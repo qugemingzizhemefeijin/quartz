@@ -73,8 +73,19 @@ public class SimpleThreadPool implements ThreadPool {
 
     private final Object nextRunnableLock = new Object();
 
+    /**
+     * 保存所有WorkerThread的集合
+     */
     private List<WorkerThread> workers;
+
+    /**
+     * 空闲的WorkerThread集合
+     */
     private LinkedList<WorkerThread> availWorkers = new LinkedList<WorkerThread>();
+
+    /**
+     * 忙碌的WorkerThread集合
+     */
     private LinkedList<WorkerThread> busyWorkers = new LinkedList<WorkerThread>();
 
     private String threadNamePrefix;
@@ -271,10 +282,13 @@ public class SimpleThreadPool implements ThreadPool {
         }
 
         // create the worker threads and start them
+        // 创建worker线程数
         Iterator<WorkerThread> workerThreads = createWorkerThreads(count).iterator();
+        // 循环启动
         while(workerThreads.hasNext()) {
             WorkerThread wt = workerThreads.next();
             wt.start();
+            // availWorkers是空闲的线程，一开始肯定都是空闲的
             availWorkers.add(wt);
         }
     }
@@ -492,7 +506,7 @@ public class SimpleThreadPool implements ThreadPool {
 
         private final Object lock = new Object();
 
-        // A flag that signals the WorkerThread to terminate.
+        // A flag that signals the WorkerThread to terminate. 标识是否线程已经停止了
         private AtomicBoolean run = new AtomicBoolean(true);
 
         private SimpleThreadPool tp;

@@ -40,6 +40,8 @@ import org.quartz.spi.SchedulerSignaler;
  * @author <a href="mailto:jeff@binaryfeed.org">Jeffrey Wescott</a>
  * @author James House
  */
+// JobStoreTX继承自JobStoreSupport
+// 而JobStoreSupport的acquireNextTriggers、triggersFired、releaseAcquiredTrigger方法负责具体trigger相关操作，都必须获得TRIGGER_ACCESS锁。
 public class JobStoreTX extends JobStoreSupport {
 
     /*

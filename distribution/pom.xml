@@ -247,7 +247,7 @@
     </plugins>
   </build>
 
-  <repositories>
+  <!--repositories>
     <repository>
       <id>terracotta-snapshots</id>
       <url>http://www.terracotta.org/download/reflector/snapshots</url>
@@ -277,6 +277,6 @@
         <enabled>false</enabled>
       </snapshots>
     </pluginRepository>    
-  </pluginRepositories>
+  </pluginRepositories-->
 
 </project>

@@ -97,6 +97,8 @@ public abstract class DBSemaphore implements Semaphore, Constants,
     /**
      * Grants a lock on the identified resource to the calling thread (blocking
      * until it is available).
+     *
+     * 获取QRTZ_LOCKS行级锁，将已标识资源的锁授予调用线程（阻塞直到可用）。
      * 
      * @return true if the lock was obtained.
      */
@@ -132,7 +134,7 @@ public abstract class DBSemaphore implements Semaphore, Constants,
        
     /**
      * Release the lock on the identified resource if it is held by the calling
-     * thread.
+     * thread. 释放QRTZ_LOCKS行级锁，如果已标识资源由调用线程持有，请释放该资源的锁。
      */
     public void releaseLock(String lockName) {
 

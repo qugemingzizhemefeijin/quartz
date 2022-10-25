@@ -325,6 +325,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
      * @see #initialize(Properties)
      */
     public StdSchedulerFactory(Properties props) throws SchedulerException {
+        // 如果传入了 Properties，则初始化指定的资源信息
         initialize(props);
     }
 
@@ -374,6 +375,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
      * <code>{@link java.lang.System#getProperties()}</code>.
      * </p>
      */
+    // 如果cfg未初始化过，则加载默认的资源
     public void initialize() throws SchedulerException {
         // short-circuit if already initialized
         if (cfg != null) {
@@ -602,12 +604,35 @@ public class StdSchedulerFactory implements SchedulerFactory {
         if (propSrc == null) {
             propSrc = "an externally provided properties instance.";
         }
-
+        // 初始化资源
         this.cfg = new PropertiesParser(props);
     }
 
+    /**
+     * <p>创建资源的逻辑基本都在这个方法里面了
+     *
+     * <p>创建ClassLoadHelper，以便根据配置文件提供的类名去创建实例
+     * <p>获取quartz.properties的配置值
+     * <p>创建ClassLoadHelper，以便根据配置文件提供的类名去创建实例
+     * <p>创建JobFactory
+     * <p>根据PropertiesParser创建ThreadPool
+     * <p>根据PropertiesParser创建JobStore
+     * <p>根据PropertiesParser创建DataSource
+     * <p>根据PropertiesParser创建SchedulerPlugin
+     * <p>根据PropertiesParser创建Listeners
+     * <p>根据PropertiesParser创建ThreadExecutor
+     * <p>根据PropertiesParser创建JobRunShellFactory
+     * <p>创建QuartzSchedulerResources
+     * <p>ThreadPool.initialize();
+     * <p>new QuartzScheduler();
+     * <p>StdScheduler的所有方法都委托给了QuartzScheduler；
+     *
+     * @return Scheduler
+     * @throws SchedulerException
+     */
     private Scheduler instantiate() throws SchedulerException {
         if (cfg == null) {
+            // 加载默认的资源
             initialize();
         }
 
@@ -636,6 +661,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
         // Get Scheduler Properties
         // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+        // 获取quartz.properties的配置值
         String schedName = cfg.getStringProperty(PROP_SCHED_INSTANCE_NAME,
                 "QuartzScheduler");
 
@@ -663,6 +689,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
             userTXLocation = null;
         }
 
+        // 创建ClassLoadHelper，以便根据配置文件提供的类名去创建实例
         classLoadHelperClass = cfg.getStringProperty(
                 PROP_SCHED_CLASS_LOAD_HELPER_CLASS,
                 "org.quartz.simpl.CascadingClassLoadHelper");
@@ -932,6 +959,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
         // Set up any DataSources
         // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+        // 根据PropertiesParser创建DataSource
         String[] dsNames = cfg.getPropertyGroups(PROP_DATASOURCE_PREFIX);
         for (int i = 0; i < dsNames.length; i++) {
             PropertiesParser pp = new PropertiesParser(cfg.getPropertyGroup(
@@ -1065,6 +1093,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
         // Set up any SchedulerPlugins
         // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+        // 根据PropertiesParser创建SchedulerPlugin
         String[] pluginNames = cfg.getPropertyGroups(PROP_PLUGIN_PREFIX);
         SchedulerPlugin[] plugins = new SchedulerPlugin[pluginNames.length];
         for (int i = 0; i < pluginNames.length; i++) {
@@ -1104,6 +1133,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
         // Set up any JobListeners
         // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+        // 根据PropertiesParser创建Listeners
         Class<?>[] strArg = new Class[] { String.class };
         String[] jobListenerNames = cfg.getPropertyGroups(PROP_JOB_LISTENER_PREFIX);
         JobListener[] jobListeners = new JobListener[jobListenerNames.length];
@@ -1203,6 +1233,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
         // Get ThreadExecutor Properties
         // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+        // 根据PropertiesParser创建ThreadExecutor
         String threadExecutorClass = cfg.getStringProperty(PROP_THREAD_EXECUTOR_CLASS);
         if (threadExecutorClass != null) {
             tProps = cfg.getPropertyGroup(PROP_THREAD_EXECUTOR, true);
@@ -1280,7 +1311,8 @@ public class StdSchedulerFactory implements SchedulerFactory {
                 
                 jjs.setThreadExecutor(threadExecutor);
             }
-    
+
+            // 创建QuartzSchedulerResources
             QuartzSchedulerResources rsrcs = new QuartzSchedulerResources();
             rsrcs.setName(schedName);
             rsrcs.setThreadName(threadName);
@@ -1563,9 +1595,9 @@ public class StdSchedulerFactory implements SchedulerFactory {
         if (cfg == null) {
             initialize();
         }
-
+        // 单例的SchedulerRepository实例
         SchedulerRepository schedRep = SchedulerRepository.getInstance();
-
+        // 如果已经有类似的Scheduler启动了，就不用再创建了
         Scheduler sched = schedRep.lookup(getSchedulerName());
 
         if (sched != null) {
@@ -1575,7 +1607,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
                 return sched;
             }
         }
-
+        // 初始化StdScheduler
         sched = instantiate();
 
         return sched;

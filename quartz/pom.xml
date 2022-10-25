@@ -251,7 +251,7 @@
     </plugins>
   </build>
   
-  <repositories>
+  <!--repositories>
     <repository>
       <id>terracotta-snapshots</id>
       <url>http://www.terracotta.org/download/reflector/snapshots</url>
@@ -271,6 +271,6 @@
       <id>terracotta-releases</id>
       <url>http://www.terracotta.org/download/reflector/releases</url>
     </pluginRepository>   
-  </pluginRepositories>
+  </pluginRepositories-->
 
 </project>

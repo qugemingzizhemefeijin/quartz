@@ -46,6 +46,12 @@ import org.slf4j.LoggerFactory;
  *
  * @author James House
  */
+// Quartz集群同步机制：
+// 每当要进行与某种业务相关的数据库操作时，先去QRTZ_LOCKS表中查询操作相关的业务对象所需要的锁，在select语句之后加for update来实现。
+// 例如，TRIGGER_ACCESS表示对任务触发器相关的信息进行修改、删除操作时所需要获得的锁。
+// 当一个线程使用上述的SQL对表中的数据执行查询操作时，若查询结果中包含相关的行，数据库就对该行进行ROW LOCK；
+// 若此时，另外一个线程使用相同的SQL对表的数据进行查询，由于查询出的数据行已经被数据库锁住了，此时这个线程就只能等待，
+// 直到拥有该行锁的线程完成了相关的业务操作，执行了commit动作后，数据库才会释放了相关行的锁，这个线程才能继续执行。
 public class QuartzSchedulerThread extends Thread {
     /*
      * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -242,8 +248,9 @@ public class QuartzSchedulerThread extends Thread {
      */
     @Override
     public void run() {
+        // QuartzScheduler调度线程不断获取trigger，触发trigger，释放trigger。
         int acquiresFailed = 0;
-
+        // 只有调用了halt()方法，才会退出这个死循环
         while (!halted.get()) {
             try {
                 // check if we're supposed to pause...
@@ -275,6 +282,7 @@ public class QuartzSchedulerThread extends Thread {
                     }
                 }
 
+                // blockForAvailableThreads的语义：阻塞直到有空闲的线程可用，然后返回其数量
                 int availThreadCount = qsRsrcs.getThreadPool().blockForAvailableThreads();
                 if(availThreadCount > 0) { // will always be true, due to semantics of blockForAvailableThreads...
 
@@ -284,6 +292,7 @@ public class QuartzSchedulerThread extends Thread {
 
                     clearSignaledSchedulingChange();
                     try {
+                        // 调度器在trigger队列中寻找30（默认）秒内一定数目的trigger(需要保证集群节点的系统时间一致)
                         triggers = qsRsrcs.getJobStore().acquireNextTriggers(
                                 now + idleWaitTime, Math.min(availThreadCount, qsRsrcs.getMaxBatchSize()), qsRsrcs.getBatchTimeWindow());
                         acquiresFailed = 0;
@@ -307,6 +316,8 @@ public class QuartzSchedulerThread extends Thread {
                             acquiresFailed++;
                         continue;
                     }
+
+                    // Part B：获取acquire状态的Trigger列表
 
                     if (triggers != null && !triggers.isEmpty()) {
 
@@ -350,6 +361,7 @@ public class QuartzSchedulerThread extends Thread {
                         }
                         if(goAhead) {
                             try {
+                                // 触发trigger
                                 List<TriggerFiredResult> res = qsRsrcs.getJobStore().triggersFired(triggers);
                                 if(res != null)
                                     bndles = res;
@@ -359,6 +371,7 @@ public class QuartzSchedulerThread extends Thread {
                                                 + triggers + "'", se);
                                 //QTZ-179 : a problem occurred interacting with the triggers from the db
                                 //we release them and loop again
+                                // 释放trigger
                                 for (int i = 0; i < triggers.size(); i++) {
                                     qsRsrcs.getJobStore().releaseAcquiredTrigger(triggers.get(i));
                                 }

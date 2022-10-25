@@ -670,6 +670,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                     }
                 }
                 getLog().info("Using db table-based data access locking (synchronization).");
+                // 注入信号量
                 setLockHandler(new StdRowLockSemaphore(getTablePrefix(), getInstanceName(), getSelectWithLockSQL()));
             } else {
                 getLog().info(
@@ -3844,6 +3845,8 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     protected <T> T executeInNonManagedTXLock(
             String lockName, 
             TransactionCallback<T> txCallback, final TransactionValidator<T> txValidator) throws JobPersistenceException {
+        // 一个调度器实例在执行涉及到分布式问题的数据库操作前，首先要获取QUARTZ_LOCKS表中对应的行级锁，
+        // 获取锁后即可执行其他表中的数据库操作，随着操作事务的提交，行级锁被释放，供其他调度实例获取。
         boolean transOwner = false;
         Connection conn = null;
         try {
@@ -3853,7 +3856,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                 if (getLockHandler().requiresConnection()) {
                     conn = getNonManagedTXConnection();
                 }
-                
+                // 获取锁
                 transOwner = getLockHandler().obtainLock(conn, lockName);
             }
             
@@ -3891,7 +3894,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                     + e.getMessage(), e);
         } finally {
             try {
-                releaseLock(lockName, transOwner);
+                releaseLock(lockName, transOwner);  // 释放锁
             } finally {
                 cleanupConnection(conn);
             }

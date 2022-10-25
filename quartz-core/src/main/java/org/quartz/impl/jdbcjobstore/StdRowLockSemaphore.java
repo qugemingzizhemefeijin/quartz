@@ -39,10 +39,12 @@ public class StdRowLockSemaphore extends DBSemaphore {
      * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
      */
 
+    // 锁定SQL语句 SELECT * FROM {0}LOCKS WHERE SCHED_NAME = {1} AND LOCK_NAME = ? FOR UPDATE
     public static final String SELECT_FOR_LOCK = "SELECT * FROM "
             + TABLE_PREFIX_SUBST + TABLE_LOCKS + " WHERE " + COL_SCHEDULER_NAME + " = " + SCHED_NAME_SUBST
             + " AND " + COL_LOCK_NAME + " = ? FOR UPDATE";
 
+    //
     public static final String INSERT_LOCK = "INSERT INTO "
         + TABLE_PREFIX_SUBST + TABLE_LOCKS + "(" + COL_SCHEDULER_NAME + ", " + COL_LOCK_NAME + ") VALUES (" 
         + SCHED_NAME_SUBST + ", ?)"; 
@@ -95,6 +97,8 @@ public class StdRowLockSemaphore extends DBSemaphore {
 
     /**
      * Execute the SQL select for update that will lock the proper database row.
+     *
+     * 执行 SQL 选择以进行更新，这将锁定正确的数据库行
      */
     @Override
     protected void executeSQL(Connection conn, final String lockName, final String expandedSQL, final String expandedInsertSQL) throws LockException {
