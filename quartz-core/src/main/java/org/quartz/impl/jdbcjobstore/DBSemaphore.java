@@ -110,8 +110,9 @@ public abstract class DBSemaphore implements Semaphore, Constants,
                 "Lock '" + lockName + "' is desired by: "
                         + Thread.currentThread().getName());
         }
+        // 判断是不是自己获取了锁，锁可重入
         if (!isLockOwner(lockName)) {
-
+            // 执行加锁操作，在子类中实现 StdRowLockSemaphore
             executeSQL(conn, lockName, expandedSQL, expandedInsertSQL);
             
             if(log.isDebugEnabled()) {
@@ -119,6 +120,7 @@ public abstract class DBSemaphore implements Semaphore, Constants,
                     "Lock '" + lockName + "' given to: "
                             + Thread.currentThread().getName());
             }
+            // 如果取到锁，把锁放到threadLocal中
             getThreadLocks().add(lockName);
             //getThreadLocksObtainer().put(lockName, new
             // Exception("Obtainer..."));

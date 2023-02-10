@@ -140,7 +140,10 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     protected int maxToRecoverAtATime = 20;
     
     private boolean setTxIsolationLevelSequential = false;
-    
+
+    /**
+     * 获取triggers的时候是否需要使用锁，默认是false
+     */
     private boolean acquireTriggersWithinLock = false;
     
     private long dbRetryInterval = 15000L; // 15 secs
@@ -462,7 +465,8 @@ public abstract class JobStoreSupport implements JobStore, Constants {
      * possible race conditions on the trigger's db row).  This is the
      * behavior prior to Quartz 1.6.3, but is considered unnecessary for most
      * databases (due to the nature of the SQL update that is performed), 
-     * and therefore a superfluous performance hit.     
+     * and therefore a superfluous performance hit.<br>
+     * 获取triggers的时候是否需要使用锁，默认是false
      */
     public boolean isAcquireTriggersWithinLock() {
         return acquireTriggersWithinLock;
@@ -670,7 +674,8 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                     }
                 }
                 getLog().info("Using db table-based data access locking (synchronization).");
-                // 注入信号量
+                // 注入信号量，如果是mssql，则会在这里注入加锁SQL，否则在 StdRowLockSemaphore 的构造函数中设置
+                // SELECT * FROM {0}LOCKS WHERE SCHED_NAME = {1} AND LOCK_NAME = ? FOR UPDATE
                 setLockHandler(new StdRowLockSemaphore(getTablePrefix(), getInstanceName(), getSelectWithLockSQL()));
             } else {
                 getLog().info(
@@ -908,6 +913,10 @@ public abstract class JobStoreSupport implements JobStore, Constants {
         }
     }
 
+    /**
+     * 当前时间 - org.quartz.jobStore.misfireThreshold (默认6000) 的值。
+     * @return long
+     */
     protected long getMisfireTime() {
         long misfireTime = System.currentTimeMillis();
         if (getMisfireThreshold() > 0) {
@@ -1529,7 +1538,14 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                 }
             });
     }
-    
+
+    /**
+     * 获取触发器的信息，从 QRTP_TRIGGERS 表中获取
+     * @param conn 数据库连接
+     * @param key  触发器的唯一KEY
+     * @return OperableTrigger
+     * @throws JobPersistenceException
+     */
     protected OperableTrigger retrieveTrigger(Connection conn, TriggerKey key)
         throws JobPersistenceException {
         try {
@@ -2795,25 +2811,34 @@ public abstract class JobStoreSupport implements JobStore, Constants {
         throws JobPersistenceException {
         
         String lockName;
+        // isAcquireTriggersWithinLock 获取triggers的时候是否需要使用锁，默认是false；
+        // 或者 org.quartz.scheduler.batchTriggerAcquisitionMaxCount > 1 情况下才使用LOCK_TRIGGER_ACCESS锁（一次性批量获取的任务数，增加会增加获取性能，减少锁冲突，否则很多机器会执行拿一个任务，锁一次）
         if(isAcquireTriggersWithinLock() || maxCount > 1) { 
             lockName = LOCK_TRIGGER_ACCESS;
         } else {
             lockName = null;
         }
-        return executeInNonManagedTXLock(lockName, 
+        // 执行回调，并选择性地获取指定的锁。这使用非事务连接。
+        // 要获取的锁的名称，例如“TRIGGER_ACCESS”。如果为 null，则不获取锁，但仍在非托管事务中执行 lockCallback。
+        return executeInNonManagedTXLock(lockName,
+                // 获取下次触发的任务列表
                 new TransactionCallback<List<OperableTrigger>>() {
                     public List<OperableTrigger> execute(Connection conn) throws JobPersistenceException {
                         return acquireNextTrigger(conn, noLaterThan, maxCount, timeWindow);
                     }
                 },
+                // 对要触发的任务进行检查，是否有上面获取到的待执行的任务列表有任务存在于正在执行的任务列表中
                 new TransactionValidator<List<OperableTrigger>>() {
                     public Boolean validate(Connection conn, List<OperableTrigger> result) throws JobPersistenceException {
                         try {
+                            // 获取当前被触发的任务
                             List<FiredTriggerRecord> acquired = getDelegate().selectInstancesFiredTriggerRecords(conn, getInstanceId());
                             Set<String> fireInstanceIds = new HashSet<String>();
+                            // FireInstanceId 就是 QTZP_FIRED_TRIGGERS 表中的 ENTRY_ID 列
                             for (FiredTriggerRecord ft : acquired) {
                                 fireInstanceIds.add(ft.getFireInstanceId());
                             }
+                            // 如果在 TransactionCallback 的 execute 中获取的任务只要有一个包含在触发任务列表中，则返回 true，否则全部都不在则返回 false
                             for (OperableTrigger tr : result) {
                                 if (fireInstanceIds.contains(tr.getFireInstanceId())) {
                                     return true;
@@ -2829,11 +2854,23 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     
     // FUTURE_TODO: this really ought to return something like a FiredTriggerBundle,
     // so that the fireInstanceId doesn't have to be on the trigger...
+    /**
+     * 获取下次触发的任务列表。这里还有一些更新任务的状态，复制任务到正在进行中的表中等操作。
+     * @param conn        数据库连接
+     * @param noLaterThan 当前时间 + 30s，属于数据库查询字段nextFireTime <= 此值
+     * @param maxCount    最多一次获取的数量
+     * @param timeWindow  允许在调度时间noLaterThan之后timeWindow内的任务，默认此值为0
+     * @return List<OperableTrigger>
+     * @throws JobPersistenceException
+     */
     protected List<OperableTrigger> acquireNextTrigger(Connection conn, long noLaterThan, int maxCount, long timeWindow)
         throws JobPersistenceException {
         if (timeWindow < 0) {
           throw new IllegalArgumentException();
         }
+
+        // misfireThreshold 如果任务本应该执行的时间和当前时间的差距大于此值，则跳过本次执行任务，默认是6000；
+        // 同时此值也会被反应到过期任务的nexFireTime刷新（会与正常的任务竞争同一把全局锁）
         
         List<OperableTrigger> acquiredTriggers = new ArrayList<OperableTrigger>();
         Set<JobKey> acquiredJobKeysForNoConcurrentExec = new HashSet<JobKey>();
@@ -2842,6 +2879,10 @@ public abstract class JobStoreSupport implements JobStore, Constants {
         do {
             currentLoopCount ++;
             try {
+                // noLaterThan默认是当前时间加30s
+                // getMisfireTime()这个参数代表的是noEarilerThan，映射到sql语句中就是nextFireTime要大于等于它的，小于等于前面的noLaterThan+timeWindow。
+                // 数据获取范围：getMisfireTime的返回值应该作为下界，上界是noLaterThan+timeWindow
+                // TriggerKey = TRIGGER_NAME, TRIGGER_GROUP
                 List<TriggerKey> keys = getDelegate().selectTriggerToAcquire(conn, noLaterThan + timeWindow, getMisfireTime(), maxCount);
                 
                 // No trigger is ready to fire yet.
@@ -3813,10 +3854,17 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     protected abstract <T> T executeInLock(
         String lockName, 
         TransactionCallback<T> txCallback) throws JobPersistenceException;
-    
+
+    /**
+     * 重试某些动作，最终还是调用到 {@link org.quartz.impl.jdbcjobstore.JobStoreSupport#executeInNonManagedTXLock(String, TransactionCallback, TransactionValidator) } 方法
+     * @param lockName   全局锁名称
+     * @param txCallback 回调函数
+     * @return 根据txCallback返回指定的类型，一般为Boolean
+     */
     protected <T> T retryExecuteInNonManagedTXLock(String lockName, TransactionCallback<T> txCallback) {
         for (int retry = 1; !shutdown; retry++) {
             try {
+                // 重新调用到原获取任务的方法中，但实际的动作是根据 txCallback execute 方法的实现来决定的
                 return executeInNonManagedTXLock(lockName, txCallback, null);
             } catch (JobPersistenceException jpe) {
                 if(retry % 4 == 0) {
@@ -3850,28 +3898,43 @@ public abstract class JobStoreSupport implements JobStore, Constants {
         boolean transOwner = false;
         Connection conn = null;
         try {
+            // 锁名称：TRIGGER_ACCESS
             if (lockName != null) {
                 // If we aren't using db locks, then delay getting DB connection 
                 // until after acquiring the lock since it isn't needed.
                 if (getLockHandler().requiresConnection()) {
-                    conn = getNonManagedTXConnection();
+                    conn = getNonManagedTXConnection(); // 获取数据库连接
                 }
-                // 获取锁
+                // 获取锁，org.quartz.impl.jdbcjobstore.DBSemaphore 105行
                 transOwner = getLockHandler().obtainLock(conn, lockName);
             }
             
             if (conn == null) {
-                conn = getNonManagedTXConnection();
+                conn = getNonManagedTXConnection(); // 不需要获取锁的话，这里来获取数据库连接
             }
-            
+
+            // 获取到任务列表（也有可能是下面的 txValidator.validate 的 Boolean返回值）
             final T result = txCallback.execute(conn);
             try {
+                // 事务提交，应该是为了释放锁，因为之前的除了有一个for update外没有其他的更新操作
                 commitConnection(conn);
             } catch (JobPersistenceException e) {
+                // 如果事务提交失败，则调用回滚
                 rollbackConnection(conn);
+                // 重试获取任务， retryExecuteInNonManagedTXLock 最后还是会调用到 executeInNonManagedTXLock 当前的方法。
+                // 此方法如果碰到异常，默认会无线重试，除非quartz关闭
+                // 进入到 retryExecuteInNonManagedTXLock之后，回调进来的 txValidator = null，应该是为了防止无限递归。
+                // 本身 retryExecuteInNonManagedTXLock 就已经无限循环重试了，没有要一直递归来调用了。
+                // 第一次重新抛出异常的话，txValidator肯定不为空，那么则会走 retryExecuteInNonManagedTXLock 方法。
+                // 这个方法只要是检查 待执行的任务列表中是否有至少一条数据在 QTZP_FIRED_TRIGGERS 正在执行任务的列表中，如果有返回True，则不会抛出异常。否则返回False，抛出异常，执行重试动作；
+                // 至于为什么返回True则不抛出异常呢？？？
+                // Quartz框架会在acquireNextTrigger去扫描QRTZ_TRIGGERS表，去获取那些将要到nextFireTime的triggers的记录。在获取到之后，要把这些记录中的部分信息插入到QRTZ_FIRED_TRIGGERS表中。
+                // 有可能是因为我这边获取到任务之后，然后因为一些不可抗力的问题，造成事务提交失败；然后就是需要去看看是否这些任务真的被本机扫描到了另一个表。如果是的话，就算也是自己本机获取到的任务；
+                // 主要为了容错。
                 if (txValidator == null || !retryExecuteInNonManagedTXLock(lockName, new TransactionCallback<Boolean>() {
                     @Override
                     public Boolean execute(Connection conn) throws JobPersistenceException {
+                        // 如果我第一次调用失败之后，重新进入获取任务列表，在执行 txCallback.execute 的时候，就会调用到这里
                         return txValidator.validate(conn, result);
                     }
                 })) {
@@ -4010,9 +4073,15 @@ public abstract class JobStoreSupport implements JobStore, Constants {
 
         private RecoverMisfiredJobsResult manage() {
             try {
+                long startTime = System.currentTimeMillis();
                 getLog().debug("MisfireHandler: scanning for misfires...");
 
                 RecoverMisfiredJobsResult res = doRecoverMisfires();
+
+                long endTime = System.currentTimeMillis();
+
+                getLog().info("MisfireHandler: scanning time cost = {}", endTime - startTime);
+
                 numFails = 0;
                 return res;
             } catch (Exception e) {

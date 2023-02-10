@@ -282,7 +282,7 @@ public class QuartzSchedulerThread extends Thread {
                     }
                 }
 
-                // blockForAvailableThreads的语义：阻塞直到有空闲的线程可用，然后返回其数量
+                // blockForAvailableThreads的语义：阻塞直到有空闲的线程可用，然后返回其数量。
                 int availThreadCount = qsRsrcs.getThreadPool().blockForAvailableThreads();
                 if(availThreadCount > 0) { // will always be true, due to semantics of blockForAvailableThreads...
 
@@ -293,6 +293,9 @@ public class QuartzSchedulerThread extends Thread {
                     clearSignaledSchedulingChange();
                     try {
                         // 调度器在trigger队列中寻找30（默认）秒内一定数目的trigger(需要保证集群节点的系统时间一致)
+                        // org.quartz.impl.jdbcjobstore.JobStoreSupport.acquireNextTriggers     2798行
+                        // org.quartz.scheduler.batchTriggerAcquisitionMaxCount                 Scheduler一次获取trigger的最大数量。默认值为1。
+                        // org.quartz.scheduler.batchTriggerAcquisitionFireAheadTimeWindow      允许trigger在调度时间之前获取和触发的时间（单位毫秒）。默认0
                         triggers = qsRsrcs.getJobStore().acquireNextTriggers(
                                 now + idleWaitTime, Math.min(availThreadCount, qsRsrcs.getMaxBatchSize()), qsRsrcs.getBatchTimeWindow());
                         acquiresFailed = 0;

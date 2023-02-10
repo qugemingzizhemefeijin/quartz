@@ -1755,6 +1755,8 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         try {
             OperableTrigger trigger = null;
 
+            // SELECT * FROM QRTP_TRIGGERS WHERE SCHED_NAME = 'XX_SCHEDULER' AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
+            // [xxx_UUID_28aa0d8e-393e-4f47-83fa-1f126832e8b5_0, commonGroup]
             ps = conn.prepareStatement(rtp(SELECT_TRIGGER));
             ps.setString(1, triggerKey.getName());
             ps.setString(2, triggerKey.getGroup());
@@ -2575,8 +2577,7 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
 
     /**
      * <p>
-     * Select the next trigger which will fire to fire between the two given timestamps 
-     * in ascending order of fire time, and then descending by priority.
+     * 选择下一个触发器，该触发器将在两个给定时间戳之间触发，按触发时间的升序排列，然后按优先级降序排列。
      * </p>
      * 
      * @param conn
@@ -2596,6 +2597,13 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         ResultSet rs = null;
         List<TriggerKey> nextTriggers = new LinkedList<TriggerKey>();
         try {
+            // SELECT TRIGGER_NAME, TRIGGER_GROUP, NEXT_FIRE_TIME, PRIORITY FROM QRTO_TRIGGERS
+            // WHERE
+            // SCHED_NAME = 'SCHEDULER_NAME'
+            // AND TRIGGER_STATE = ?
+            // AND NEXT_FIRE_TIME <= ? AND (MISFIRE_INSTR = -1 OR (MISFIRE_INSTR != -1 AND NEXT_FIRE_TIME >= ?))
+            // ORDER BY NEXT_FIRE_TIME ASC, PRIORITY DESC;
+            // [WAITING, 1672204392868, 1672204064544]
             ps = conn.prepareStatement(rtp(SELECT_NEXT_TRIGGER_TO_ACQUIRE));
             
             // Set max rows to retrieve
@@ -2606,12 +2614,16 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
             // Try to give jdbc driver a hint to hopefully not pull over more than the few rows we actually need.
             // Note: in some jdbc drivers, such as MySQL, you must set maxRows before fetchSize, or you get exception!
             ps.setFetchSize(maxCount);
+
+            // setMaxRows和setFetchSize会最终区最小的一个值；此功能与在SQL中直接添加limit效果一致，只是可以让SQL更通用一些，让JDBC来帮你完成分页动作；
+            // 但是某些数据库可能不支持如上操作；
             
             ps.setString(1, STATE_WAITING);
-            ps.setBigDecimal(2, new BigDecimal(String.valueOf(noLaterThan)));
-            ps.setBigDecimal(3, new BigDecimal(String.valueOf(noEarlierThan)));
+            ps.setBigDecimal(2, new BigDecimal(String.valueOf(noLaterThan))); // noLaterThan + timeWindow (noLaterThan = now + idleWaitTime) org.quartz.core.QuartzSchedulerThread 2818行
+            ps.setBigDecimal(3, new BigDecimal(String.valueOf(noEarlierThan))); // org.quartz.impl.jdbcjobstore.getMisfireTime() 方法的值
             rs = ps.executeQuery();
-            
+
+            // 循环添加任务
             while (rs.next() && nextTriggers.size() < maxCount) {
                 nextTriggers.add(triggerKey(
                         rs.getString(COL_TRIGGER_NAME),
@@ -2821,6 +2833,7 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
 
     }
 
+    @Override
     public List<FiredTriggerRecord> selectInstancesFiredTriggerRecords(Connection conn,
             String instanceName) throws SQLException {
         PreparedStatement ps = null;
@@ -2828,6 +2841,8 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         try {
             List<FiredTriggerRecord> lst = new LinkedList<FiredTriggerRecord>();
 
+            // 查询本机已触发的任务
+            // SELECT * FROM QRTZ_FIRED_TRIGGERS WHERE SCHED_NAME = {1} AND INSTANCE_NAME = ?
             ps = conn.prepareStatement(rtp(SELECT_INSTANCES_FIRED_TRIGGERS));
             ps.setString(1, instanceName);
             rs = ps.executeQuery();

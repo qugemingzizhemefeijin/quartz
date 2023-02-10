@@ -62,6 +62,8 @@ public class StdRowLockSemaphore extends DBSemaphore {
     }
 
     public StdRowLockSemaphore(String tablePrefix, String schedName, String selectWithLockSQL) {
+        // SELECT * FROM {0}LOCKS WHERE SCHED_NAME = {1} AND LOCK_NAME = ? FOR UPDATE
+        // INSERT INTO {0}LOCKS(SCHED_NAME, LOCK_NAME) VALUES ({1}, ?)
         super(tablePrefix, schedName, selectWithLockSQL != null ? selectWithLockSQL : SELECT_FOR_LOCK, INSERT_LOCK);
     }
 
@@ -110,8 +112,8 @@ public class StdRowLockSemaphore extends DBSemaphore {
         int count = 0;
 
         // Configurable lock retry attempts
-        int maxRetryLocal = this.maxRetry;
-        long retryPeriodLocal = this.retryPeriod;
+        int maxRetryLocal = this.maxRetry; // 最多尝试三次加锁
+        long retryPeriodLocal = this.retryPeriod; // 每次加锁间隔1秒
 
         do {
             count++;

@@ -951,6 +951,10 @@ public interface DriverDelegate {
      * Select the next trigger which will fire to fire between the two given timestamps 
      * in ascending order of fire time, and then descending by priority.
      * </p>
+     *
+     * <p>
+     *     选择下一个触发器，该触发器将在两个给定时间戳之间触发，按触发时间的升序排列，然后按优先级降序排列。
+     * </p>
      * 
      * @param conn
      *          the DB Connection
@@ -1020,15 +1024,13 @@ public interface DriverDelegate {
     List<FiredTriggerRecord> selectFiredTriggerRecordsByJob(Connection conn, String jobName, String groupName) throws SQLException;
 
     /**
-     * <p>
-     * Select the states of all fired-trigger records for a given scheduler
-     * instance.
-     * </p>
-     * 
-     * @return a List of FiredTriggerRecord objects.
+     * 查询本机所有被触发的任务，此处SQL没有分页。一般情况下不会特别多。
+     * @param conn         数据库连接
+     * @param instanceName 本地实例名称，如 vis-11-225-1131675957719688
+     * @return List<FiredTriggerRecord>
+     * @throws SQLException
      */
-    List<FiredTriggerRecord> selectInstancesFiredTriggerRecords(Connection conn,
-        String instanceName) throws SQLException;
+    List<FiredTriggerRecord> selectInstancesFiredTriggerRecords(Connection conn, String instanceName) throws SQLException;
 
     
     /**
