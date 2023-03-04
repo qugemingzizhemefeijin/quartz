@@ -439,6 +439,7 @@ public interface DriverDelegate {
 
     /**
      * <p>
+     *     修改触发器从预期状态修改为指定的状态 <br>
      * Update the given trigger to the given new state, if it is in the given
      * old state.
      * </p>

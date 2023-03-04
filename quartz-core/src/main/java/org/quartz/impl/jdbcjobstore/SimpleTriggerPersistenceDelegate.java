@@ -87,14 +87,19 @@ public class SimpleTriggerPersistenceDelegate implements TriggerPersistenceDeleg
         ResultSet rs = null;
         
         try {
+            // SELECT * FROM QRTP_SIMPLE_TRIGGERS WHERE SCHED_NAME = 'ORD_SCHEDULER' AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
+            // [XXXX_UUID_28aa0d8e-393e-4f47-83fa-1f126832e8b5_0, defaultGroup]
             ps = conn.prepareStatement(Util.rtp(SELECT_SIMPLE_TRIGGER, tablePrefix, schedNameLiteral));
             ps.setString(1, triggerKey.getName());
             ps.setString(2, triggerKey.getGroup());
             rs = ps.executeQuery();
     
             if (rs.next()) {
+                // 重复的次数统计
                 int repeatCount = rs.getInt(COL_REPEAT_COUNT);
+                // 重复的间隔时间
                 long repeatInterval = rs.getLong(COL_REPEAT_INTERVAL);
+                // 已经触发的次数
                 int timesTriggered = rs.getInt(COL_TIMES_TRIGGERED);
 
                 SimpleScheduleBuilder sb = SimpleScheduleBuilder.simpleSchedule()

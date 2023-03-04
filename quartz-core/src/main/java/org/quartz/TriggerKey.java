@@ -21,6 +21,8 @@ import org.quartz.utils.Key;
 
 /**
  * Uniquely identifies a {@link Trigger}.
+ *
+ * 任务名称 + 组名称 组成任务的唯一名称
  * 
  * <p>Keys are composed of both a name and group, and the name must be unique
  * within the group.  If only a name is specified then the default group
@@ -50,7 +52,6 @@ import org.quartz.utils.Key;
  *         
  *         scheduler.scheduleJob(job, trigger);
  * <pre>
- *  
  * 
  * @see Trigger
  * @see Key#DEFAULT_GROUP

@@ -44,6 +44,19 @@ public interface TriggerPersistenceDelegate {
     
     public int deleteExtendedTriggerProperties(Connection conn, TriggerKey triggerKey) throws SQLException;
 
+    /**
+     * 根据特定的触发器类型获取具体的触发器扩展属性<br>
+     * <ul>
+     *     <li>SIMPLE: 从表 QTZP_SIMPLE_TRIGGERS 中获取；</li>
+     *     <li>CRON: 从表 QTZP_CRON_TRIGGERS 中获取；</li>
+     *     <li>DAILY_I: 从表 QTZP_SIMPROP_TRIGGERS 中获取；</li>
+     *     <li>CAL_INT: 上同</li>
+     * </ul>
+     * @param conn       数据库连接
+     * @param triggerKey 触发器唯一值
+     * @return TriggerPropertyBundle
+     * @throws SQLException
+     */
     public TriggerPropertyBundle loadExtendedTriggerProperties(Connection conn, TriggerKey triggerKey) throws SQLException;
     
     

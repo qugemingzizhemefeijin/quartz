@@ -127,6 +127,7 @@ public class QuartzSchedulerThread extends Thread {
         // state
         // so processing doesn't start yet...
         paused = true;
+        // 初始化任务为正常状态
         halted = new AtomicBoolean(false);
     }
 
@@ -320,22 +321,29 @@ public class QuartzSchedulerThread extends Thread {
                         continue;
                     }
 
-                    // Part B：获取acquire状态的Trigger列表
-
+                    // 如果获取到待执行的任务列表
                     if (triggers != null && !triggers.isEmpty()) {
-
                         now = System.currentTimeMillis();
+                        // 第一个任务的触发时间（第一个任务一般是最早触发的）
                         long triggerTime = triggers.get(0).getNextFireTime().getTime();
+                        // 任务的触发时间与当前的时间差值
                         long timeUntilTrigger = triggerTime - now;
+                        // 如果任务触发时间大于当前时间2秒以上
                         while(timeUntilTrigger > 2) {
                             synchronized (sigLock) {
                                 if (halted.get()) {
                                     break;
                                 }
+                                // 查看当前的调度器的状态码和点火时间是否被更改过。如果没有被更改过，则会进入线程等待。
+                                // 比如当一个Scheduler添加Job时，我们会将改变该Scheduler的下次点火时间与signaled状态码
+                                // org.quartz.core.QuartzScheduler.notifySchedulerThread 里面会调用更改方法
+                                // org.quartz.core.QuartzSchedulerThread.signalSchedulingChange 更改状态的代码
+                                // 按理应该不可能有这种，但是不排除外层有通过MBean，Remote等方式将新的任务插入进来
                                 if (!isCandidateNewTimeEarlierWithinReason(triggerTime, false)) {
                                     try {
                                         // we could have blocked a long while
                                         // on 'synchronize', so we must recompute
+                                        // 重新计算并等待真正的触发时间到来
                                         now = System.currentTimeMillis();
                                         timeUntilTrigger = triggerTime - now;
                                         if(timeUntilTrigger >= 1)
@@ -344,9 +352,12 @@ public class QuartzSchedulerThread extends Thread {
                                     }
                                 }
                             }
+                            // wait到期，或者状态码等信息有变更，会调用到这里，上面方法clearSignal=false，这个方法里面clearSignal=true
+                            // 应该是为了重置Scheduler状态和时间并且将触发器状态重置，重新进入获取任务列表周期。
                             if(releaseIfScheduleChangedSignificantly(triggers, triggerTime)) {
                                 break;
                             }
+                            // 重新计算新的等待时间，方便跳出循环
                             now = System.currentTimeMillis();
                             timeUntilTrigger = triggerTime - now;
                         }
@@ -358,13 +369,14 @@ public class QuartzSchedulerThread extends Thread {
                         // set triggers to 'executing'
                         List<TriggerFiredResult> bndles = new ArrayList<TriggerFiredResult>();
 
+                        // 如果Scheduler停了，则goAhead=false，并且会被跳出大循环
                         boolean goAhead = true;
                         synchronized(sigLock) {
                             goAhead = !halted.get();
                         }
                         if(goAhead) {
                             try {
-                                // 触发trigger
+                                // 更新触发器的状态并且包装成可执行的TriggerFiredResult对象，等待被执行任务方法。（任务点火，但是没有到真正的执行）
                                 List<TriggerFiredResult> res = qsRsrcs.getJobStore().triggersFired(triggers);
                                 if(res != null)
                                     bndles = res;
@@ -480,11 +492,19 @@ public class QuartzSchedulerThread extends Thread {
         return delay;
     }
 
+    /**
+     * 如果当前的调度器的状态码和点火时间被修改过了，则清空任务列表。并返回false跳出循环，重新进入获取任务列表周期。
+     * @param triggers    触发器任务列表
+     * @param triggerTime 最近的任务触发时间
+     * @return boolean true重新开始任务获取周期，false继续往下任务执行
+     */
     private boolean releaseIfScheduleChangedSignificantly(
             List<OperableTrigger> triggers, long triggerTime) {
+        // 查看当前的调度器的状态码和点火时间是否被更改过。
         if (isCandidateNewTimeEarlierWithinReason(triggerTime, true)) {
             // above call does a clearSignaledSchedulingChange()
             for (OperableTrigger trigger : triggers) {
+                // 通知触发器不再计划触发它了
                 qsRsrcs.getJobStore().releaseAcquiredTrigger(trigger);
             }
             triggers.clear();
@@ -493,6 +513,12 @@ public class QuartzSchedulerThread extends Thread {
         return false;
     }
 
+    /**
+     * 判断当前的调度系统是否状态被更改或者点火时间被更改
+     * @param oldTime     此时间会与Scheduler点火时间比较（前提是Scheduler点火时间>0），如果大于的话，则相当于认为没有任何改变
+     * @param clearSignal 如果判定为更改，则是否在方法执行完毕前清空一下状态码
+     * @return boolean false没有改变，true改变了
+     */
     private boolean isCandidateNewTimeEarlierWithinReason(long oldTime, boolean clearSignal) {
 
         // So here's the deal: We know due to being signaled that 'the schedule'
@@ -520,6 +546,7 @@ public class QuartzSchedulerThread extends Thread {
 
             boolean earlier = false;
 
+            // 如果Scheduler点火时间=0或者Scheduler点火时间小于当前等待的任务的点火时间，则任务应该早点出发。
             if(getSignaledNextFireTime() == 0)
                 earlier = true;
             else if(getSignaledNextFireTime() < oldTime )
@@ -527,11 +554,14 @@ public class QuartzSchedulerThread extends Thread {
 
             if(earlier) {
                 // so the new time is considered earlier, but is it enough earlier?
+                // 所以新时间考虑得更早，但早点就够了吗？？
                 long diff = oldTime - System.currentTimeMillis();
+                // 根据是否进行持久化做的判断，如果做持久化就是70ms,不做则是7ms（其实就是任务快执行了，就不要折腾了）
                 if(diff < (qsRsrcs.getJobStore().supportsPersistence() ? 70L : 7L))
                     earlier = false;
             }
 
+            // 是否清理状态，将signaled=false,signaledNextFireTime=0，这样下次循环进来就会返回false
             if(clearSignal) {
                 clearSignaledSchedulingChange();
             }

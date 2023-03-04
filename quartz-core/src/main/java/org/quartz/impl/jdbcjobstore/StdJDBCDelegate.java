@@ -194,7 +194,16 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         return null;
     }
 
+    /**
+     * 根据TriggerType的类型获取对应触发器的扩展属性的实现。
+     * @param discriminator 触发器类型，如CRON、SIMPLE、CAL_INT、DAILY_I
+     * @return TriggerPersistenceDelegate
+     */
     public TriggerPersistenceDelegate findTriggerPersistenceDelegate(String discriminator)  {
+        // CalendarIntervalTriggerPersistenceDelegate
+        // CronTriggerPersistenceDelegate
+        // DailyTimeIntervalTriggerPersistenceDelegate
+        // SimpleTriggerPersistenceDelegate
         for(TriggerPersistenceDelegate delegate: triggerPersistenceDelegates) {
             if(delegate.getHandledTriggerTypeDiscriminator().equals(discriminator))
                 return delegate;
@@ -836,6 +845,8 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         ResultSet rs = null;
 
         try {
+            // SELECT * FROM EB_QRTO_JOB_DETAILS WHERE SCHED_NAME = 'XXX_SCHEDULER' AND JOB_NAME = ? AND JOB_GROUP = ?
+            // [xxxx_UUID_28aa0d8e-393e-4f47-83fa-1f126832e8b5_0, defaultGroup]
             ps = conn.prepareStatement(rtp(SELECT_JOB_DETAIL));
             ps.setString(1, jobKey.getName());
             ps.setString(2, jobKey.getGroup());
@@ -846,20 +857,30 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
             if (rs.next()) {
                 job = new JobDetailImpl();
 
+                // 任务名称
                 job.setName(rs.getString(COL_JOB_NAME));
+                // 任务分组
                 job.setGroup(rs.getString(COL_JOB_GROUP));
+                // 任务描述
                 job.setDescription(rs.getString(COL_DESCRIPTION));
+                // 任务执行的Class（同时这里会加载Class到ClassLoader）
                 job.setJobClass( loadHelper.loadClass(rs.getString(COL_JOB_CLASS), Job.class));
+                // 作业是否应在孤立后保留存储（没有触发器指向它）。即假如没有触发器指向该JobDetail是否要持久化到对应的储存中去。(线上基本为false)
                 job.setDurability(getBoolean(rs, COL_IS_DURABLE));
+                // 如果遇到“恢复”或“故障转移”情况，则指示调度程序是否应重新执行作业。最简单的例子就是当Job正在执行时遇到系统崩溃，重启服务后是否要重新执行该Job。默认为false
                 job.setRequestsRecovery(getBoolean(rs, COL_REQUESTS_RECOVERY));
 
                 Map<?, ?> map = null;
+                // 为了指示JDBCJobStore所有的JobDataMaps中的值都是字符串，并且能以“名字-值”对的方式存储
+                // 而不是以复杂对象的序列化形式存储在BLOB字段中，应该设置为true(缺省方式)
+                // org.quartz.jobStore.useProperties = true
                 if (canUseProperties()) {
                     map = getMapFromProperties(rs);
                 } else {
                     map = (Map<?, ?>) getObjectFromBlob(rs, COL_JOB_DATAMAP);
                 }
 
+                // 如果JOB_DATA字段中有值，则存储到 JobDetail 的 jobDataMap 属性中。
                 if (null != map) {
                     job.setJobDataMap(new JobDataMap(map));
                 }
@@ -1415,6 +1436,11 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
      * Update the given trigger to the given new state, if it is in the given
      * old state.
      * </p>
+     *
+     * <p>
+     *     修改触发器从预期状态修改为指定的状态；<br>
+     *     UPDATE QRTP_TRIGGERS SET TRIGGER_STATE = ? WHERE SCHED_NAME = 'XXX_SCHEDULER' AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ? AND TRIGGER_STATE = ?
+     * </p>
      * 
      * @param conn
      *          the DB connection
@@ -1430,10 +1456,16 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         PreparedStatement ps = null;
 
         try {
+            // UPDATE QRTP_TRIGGERS SET TRIGGER_STATE = ? WHERE SCHED_NAME = 'XXX_SCHEDULER' AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ? AND TRIGGER_STATE = ?
+            // [ACQUIRED, XXX_28aa0d8e-393e-4f47-83fa-1f126832e8b5_0, defaultGroup, WAITING]
             ps = conn.prepareStatement(rtp(UPDATE_TRIGGER_STATE_FROM_STATE));
+            // 新状态
             ps.setString(1, newState);
+            // 触发器名称
             ps.setString(2, triggerKey.getName());
+            // 触发器分组
             ps.setString(3, triggerKey.getGroup());
+            // 原始状态
             ps.setString(4, oldState);
 
             return ps.executeUpdate();
@@ -1797,10 +1829,13 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
                     endTimeD = new Date(endTime);
                 }
 
+                // 是否是用户自己创建的blob类型的Triggers
                 if (triggerType.equals(TTYPE_BLOB)) {
                     rs.close(); rs = null;
                     ps.close(); ps = null;
 
+                    // qrtz_blob_triggers表 用来存储Trigger作为Blob类型(用于 Quartz 用户用 JDBC 创建他们自己定制的 Trigger 类型，JobStore 并不知道如何存储实例的时候)。
+                    // SELECT * FROM QRTZ_BLOB_TRIGGERS WHERE SCHED_NAME = 'XX_SCHEDULER' AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
                     ps = conn.prepareStatement(rtp(SELECT_BLOB_TRIGGER));
                     ps.setString(1, triggerKey.getName());
                     ps.setString(2, triggerKey.getGroup());
@@ -1811,11 +1846,13 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
                     }
                 }
                 else {
+                    // 获取存储特定类型的触发器的扩展属性的实现。
                     TriggerPersistenceDelegate tDel = findTriggerPersistenceDelegate(triggerType);
                     
                     if(tDel == null)
                         throw new JobPersistenceException("No TriggerPersistenceDelegate for trigger discriminator type: " + triggerType);
 
+                    // 根据策略获取不同触发器的扩展属性（里面属性 statePropertyNames和statePropertyValues 可以用于反射设置属性值）
                     TriggerPropertyBundle triggerProps = null;
                     try {
                         triggerProps = tDel.loadExtendedTriggerProperties(conn, triggerKey);
@@ -1828,6 +1865,7 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
                         }
                     }
 
+                    // 创建任务对象（默认里面会使用到此构造器 org.quartz.SimpleScheduleBuilder）
                     TriggerBuilder<?> tb = newTrigger()
                         .withDescription(description)
                         .withPriority(priority)
@@ -1843,11 +1881,13 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
                     }
     
                     trigger = (OperableTrigger) tb.build();
-                    
+
+                    // 设置下次任务触发时间
                     trigger.setMisfireInstruction(misFireInstr);
                     trigger.setNextFireTime(nft);
                     trigger.setPreviousFireTime(pft);
-                    
+
+                    // 将 TriggerPropertyBundle 中维持的 timesTriggered (已触发次数) 赋值到 SimpleTriggerImpl 属性中
                     setTriggerStateProperties(trigger, triggerProps);
                 }                
             }
@@ -1933,6 +1973,8 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
      * <p>
      * Select a trigger' state value.
      * </p>
+     *
+     * 查看触发器当前的状态，如果查询不出数据，则默认返回 DELETED 状态
      * 
      * @param conn
      *          the DB Connection
@@ -1945,6 +1987,8 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         try {
             String state = null;
 
+            // SELECT TRIGGER_STATE FROM QRTO_TRIGGERS WHERE SCHED_NAME = 'ORD_SCHEDULER' AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
+            // xxxx_UUID_28a9a707-45e9-497f-b704-2340e7b3961c_0, dynamicGroup
             ps = conn.prepareStatement(rtp(SELECT_TRIGGER_STATE));
             ps.setString(1, triggerKey.getName());
             ps.setString(2, triggerKey.getGroup());
@@ -2346,6 +2390,7 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         PreparedStatement ps = null;
         ResultSet rs = null;
         try {
+            // SELECT * FROM QRTP_CALENDARS WHERE SCHED_NAME = {1} AND CALENDAR_NAME = ?
             String selCal = rtp(SELECT_CALENDAR);
             ps = conn.prepareStatement(selCal);
             ps.setString(1, calendarName);
@@ -2654,18 +2699,31 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
             String state, JobDetail job) throws SQLException {
         PreparedStatement ps = null;
         try {
+            // INSERT INTO EQRTO_FIRED_TRIGGERS (SCHED_NAME, ENTRY_ID, TRIGGER_NAME, TRIGGER_GROUP, INSTANCE_NAME, FIRED_TIME, SCHED_TIME, STATE, JOB_NAME, JOB_GROUP, IS_NONCONCURRENT, REQUESTS_RECOVERY, PRIORITY)
+            // VALUES('XXX_ORD_SCHEDULER', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ps = conn.prepareStatement(rtp(INSERT_FIRED_TRIGGER));
+            // ENTRY_ID
             ps.setString(1, trigger.getFireInstanceId());
+            // TRIGGER_NAME
             ps.setString(2, trigger.getKey().getName());
+            // TRIGGER_GROUP
             ps.setString(3, trigger.getKey().getGroup());
+            // INSTANCE_NAME，本机的实例名称
             ps.setString(4, instanceId);
+            // FIRED_TIME 当前时间
             ps.setBigDecimal(5, new BigDecimal(String.valueOf(System.currentTimeMillis())));
+            // SCHED_TIME 任务本应该触发的时间，直接获取的是trigger的nextFireTime字段
             ps.setBigDecimal(6, new BigDecimal(String.valueOf(trigger.getNextFireTime().getTime())));
+            // STATE 状态，一般为 ACQUIRED
             ps.setString(7, state);
             if (job != null) {
+                // JOB_NAME
                 ps.setString(8, trigger.getJobKey().getName());
+                // JOB_GROUP
                 ps.setString(9, trigger.getJobKey().getGroup());
+                // IS_NONCONCURRENT 是否关闭并发执行
                 setBoolean(ps, 10, job.isConcurrentExectionDisallowed());
+                // REQUESTS_RECOVERY 如果遇到“恢复”或“故障转移”情况，则指示调度程序是否应重新执行作业。最简单的例子就是当Job正在执行时遇到系统崩溃，重启服务后是否要重新执行该Job。默认为false
                 setBoolean(ps, 11, job.requestsRecovery());
             } else {
                 ps.setString(8, null);
@@ -2673,6 +2731,7 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
                 setBoolean(ps, 10, false);
                 setBoolean(ps, 11, false);
             }
+            // 优先级
             ps.setInt(12, trigger.getPriority());
 
             return ps.executeUpdate();
@@ -2698,18 +2757,30 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
             String state, JobDetail job) throws SQLException {
         PreparedStatement ps = null;
         try {
+            // UPDATE QRTO_FIRED_TRIGGERS SET
+            // INSTANCE_NAME = ?, FIRED_TIME = ?, SCHED_TIME = ?, STATE = ?, JOB_NAME = ?, JOB_GROUP = ?,
+            // IS_NONCONCURRENT = ?, REQUESTS_RECOVERY = ?
+            // WHERE
+            // SCHED_NAME = 'ORD_SCHEDULER' AND ENTRY_ID = ?
             ps = conn.prepareStatement(rtp(UPDATE_FIRED_TRIGGER));
-            
-            ps.setString(1, instanceId);
 
+            // INSTANCE_NAME 当前正在执行的实例ID
+            ps.setString(1, instanceId);
+            // FIRED_TIME 触发时间
             ps.setBigDecimal(2, new BigDecimal(String.valueOf(System.currentTimeMillis())));
+            // SCHED_TIME 任务本应该触发的时间，直接获取的是trigger的nextFireTime字段
             ps.setBigDecimal(3, new BigDecimal(String.valueOf(trigger.getNextFireTime().getTime())));
+            // STATE 修改状态
             ps.setString(4, state);
 
             if (job != null) {
+                // JOB_NAME
                 ps.setString(5, trigger.getJobKey().getName());
+                // JOB_GROUP
                 ps.setString(6, trigger.getJobKey().getGroup());
+                // IS_NONCONCURRENT 是否关闭并发执行
                 setBoolean(ps, 7, job.isConcurrentExectionDisallowed());
+                // REQUESTS_RECOVERY 如果遇到“恢复”或“故障转移”情况，则指示调度程序是否应重新执行作业。最简单的例子就是当Job正在执行时遇到系统崩溃，重启服务后是否要重新执行该Job。默认为false
                 setBoolean(ps, 8, job.requestsRecovery());
             } else {
                 ps.setString(5, null);
@@ -2718,6 +2789,7 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
                 setBoolean(ps, 8, false);
             }
 
+            // 任务ID
             ps.setString(9, trigger.getFireInstanceId());
 
 

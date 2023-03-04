@@ -600,6 +600,10 @@ public interface JobStore {
      * Inform the <code>JobStore</code> that the scheduler no longer plans to
      * fire the given <code>Trigger</code>, that it had previously acquired
      * (reserved).
+     *
+     * <p>
+     *     通知触发器不再计划触发它了
+     * </p>
      */
     void releaseAcquiredTrigger(OperableTrigger trigger);
 

@@ -239,6 +239,10 @@ public abstract class JobStoreSupport implements JobStore, Constants {
      * <p>
      * Set the instance Id of the Scheduler (must be unique within a cluster).
      * </p>
+     *
+     * <p>
+     *     设置实例ID
+     * </p>
      */
     public void setInstanceId(String instanceId) {
         this.instanceId = instanceId;
@@ -247,6 +251,15 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     /**
      * <p>
      * Get the instance Id of the Scheduler (must be unique within a cluster).
+     * </p>
+     *
+     * <p>
+     *     获取实例ID，如果未配置 org.quartz.scheduler.instanceId 属性，则会走默认值AUTO，并且会通过生成器生成。<br>
+     *     如果值为AUTO，生成器为org.quartz.simpl.SimpleInstanceIdGenerator，值为SYS_PROP，生成器为org.quartz.simpl.SystemPropertyInstanceIdGenerator。
+     * </p>
+     *
+     * <p>
+     *     一般为SimpleInstanceIdGenerator生成的是本机的主机名+时间戳
      * </p>
      */
     public String getInstanceId() {
@@ -1393,10 +1406,17 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                 }
             });
     }
-    
+
+    /**
+     * 获取任务被执行的详细信息，包括执行类，任务绑定数据，描述信息，是否可并发等。
+     * @param conn 数据库连接
+     * @param key  任务唯一名
+     * @return JobDetail
+     * @throws JobPersistenceException
+     */
     protected JobDetail retrieveJob(Connection conn, JobKey key) throws JobPersistenceException {
         try {
-
+            // org.quartz.impl.jdbcjobstore.StdJDBCDelegate
             return getDelegate().selectJobDetail(conn, key,
                     getClassLoadHelper());
         } catch (ClassNotFoundException e) {
@@ -1540,16 +1560,16 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     }
 
     /**
-     * 获取触发器的信息，从 QRTP_TRIGGERS 表中获取
+     * 获取任务的信息，从 QRTP_TRIGGERS 表中获取
      * @param conn 数据库连接
-     * @param key  触发器的唯一KEY
+     * @param key  任务的唯一KEY
      * @return OperableTrigger
      * @throws JobPersistenceException
      */
     protected OperableTrigger retrieveTrigger(Connection conn, TriggerKey key)
         throws JobPersistenceException {
         try {
-
+            // org.quartz.impl.jdbcjobstore.StdJDBCDelegate
             return getDelegate().selectTrigger(conn, key);
         } catch (Exception e) {
             throw new JobPersistenceException("Couldn't retrieve trigger: "
@@ -1812,12 +1832,20 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                 }
             });
     }
-    
+
+    /**
+     * 去 QRTP_CALENDARS 中获取 信息
+     * @param conn    Connection
+     * @param calName 日历名称
+     * @return Calendar
+     * @throws JobPersistenceException
+     */
     protected Calendar retrieveCalendar(Connection conn,
             String calName)
         throws JobPersistenceException {
         // all calendars are persistent, but we can lazy-cache them during run
         // time as long as we aren't running clustered.
+        // 查看缓存中是否存在（非集群才使用）
         Calendar cal = (isClustered) ? null : calendarCache.get(calName);
         if (cal != null) {
             return cal;
@@ -1825,6 +1853,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
 
         try {
             cal = getDelegate().selectCalendar(conn, calName);
+            // 非集群存储到缓存中
             if (!isClustered) {
                 calendarCache.put(calName, cal); // lazy-cache...
             }
@@ -2794,6 +2823,10 @@ public abstract class JobStoreSupport implements JobStore, Constants {
 
     private static long ftrCtr = System.currentTimeMillis();
 
+    /**
+     * 生成任务触发的ID，为 {@link JobStoreSupport#getInstanceId()} + 时间戳 + 1
+     * @return String
+     */
     protected synchronized String getFiredTriggerRecordId() {
         return getInstanceId() + ftrCtr++;
     }
@@ -2824,6 +2857,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                 // 获取下次触发的任务列表
                 new TransactionCallback<List<OperableTrigger>>() {
                     public List<OperableTrigger> execute(Connection conn) throws JobPersistenceException {
+                        // 获取要触发的任务列表
                         return acquireNextTrigger(conn, noLaterThan, maxCount, timeWindow);
                     }
                 },
@@ -2893,6 +2927,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
 
                 for(TriggerKey triggerKey: keys) {
                     // If our trigger is no longer available, try a new one.
+                    // 根据任务名称获取任务的信息
                     OperableTrigger nextTrigger = retrieveTrigger(conn, triggerKey);
                     if(nextTrigger == null) {
                         continue; // next trigger
@@ -2900,9 +2935,11 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                     
                     // If trigger's job is set as @DisallowConcurrentExecution, and it has already been added to result, then
                     // put it back into the timeTriggers set and continue to search for next trigger.
+                    // 任务唯一名称
                     JobKey jobKey = nextTrigger.getJobKey();
                     JobDetail job;
                     try {
+                        // 获取任务的详细信息，包括是否可并发、执行类、数据信息等；
                         job = retrieveJob(conn, jobKey);
                     } catch (JobPersistenceException jpe) {
                         try {
@@ -2913,8 +2950,10 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                         }
                         continue;
                     }
-                    
+
+                    // 查看加载的JOB_CLASS_NAME指向的类是否有 @DisallowConcurrentExecution 注解（不允许单个任务并发执行）
                     if (job.isConcurrentExectionDisallowed()) {
+                        // 不允许并发执行的任务，需要排重，不要被重复返回（因为第二次查询有可能继续被查出来，凡是continue都可能造成二次查询）
                         if (acquiredJobKeysForNoConcurrentExec.contains(jobKey)) {
                             continue; // next trigger
                         } else {
@@ -2929,32 +2968,43 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                     // data?), we then should log a warning and continue to next trigger.
                     // User would need to manually fix these triggers from DB as they will not
                     // able to be clean up by Quartz since we are not returning it to be processed.
+                    // 从数据库获取触发器时，不应在nextFireTime返回NULL。但是无论出于何种原因，
+                    // 如果我们确实有这个（BAD 触发器实现或数据？），我们应该记录一个警告并继续下一个触发器。
+                    // 用户需要从数据库中手动修复这些触发器，因为它们将无法被 Quartz 清理，因为我们没有将其返回进行处理。
                     if (nextFireTime == null) {
                         log.warn("Trigger {} returned null on nextFireTime and yet still exists in DB!",
                             nextTrigger.getKey());
                         continue;
                     }
-                    
+
+                    // 如果任务的下次执行时间超出了本次选择数据的范围，则直接跳出循环，不再处理后面的任务；（获取数据的时候排过序的）
                     if (nextFireTime.getTime() > batchEnd) {
                       break;
                     }
                     // We now have a acquired trigger, let's add to return list.
                     // If our trigger was no longer in the expected state, try a new one.
+                    // 我们现在有一个获得的触发器，让我们添加到返回列表中。如果我们的触发器不再处于预期状态，跳过。
+                    // 预期的状态为 WAITING 修改为 ACQUIRED，如果修改没有成功，则不处理并跳过本任务；
                     int rowsUpdated = getDelegate().updateTriggerStateFromOtherState(conn, triggerKey, STATE_ACQUIRED, STATE_WAITING);
                     if (rowsUpdated <= 0) {
                         continue; // next trigger
                     }
+                    // 生成本次任务的触发ID
                     nextTrigger.setFireInstanceId(getFiredTriggerRecordId());
+                    // 将已触发的Trigger相关的状态信息，以及相联Job的执行信息存储到 QRTO_FIRED_TRIGGERS 表中
                     getDelegate().insertFiredTrigger(conn, nextTrigger, STATE_ACQUIRED, null);
 
+                    // 如果任务为本批次的第一个，则记录一下本批次最多能获取到的任务结束时间，用于上面获取到的触发时间大于这个时间，则本任务获取就结束了
                     if(acquiredTriggers.isEmpty()) {
                         batchEnd = Math.max(nextFireTime.getTime(), System.currentTimeMillis()) + timeWindow;
                     }
+                    // 添加入队列
                     acquiredTriggers.add(nextTrigger);
                 }
 
                 // if we didn't end up with any trigger to fire from that first
                 // batch, try again for another batch. We allow with a max retry count.
+                // 如果我们最终没有从第一批触发任何触发器，请重试另一批。我们允许最大重试计数。
                 if(acquiredTriggers.size() == 0 && currentLoopCount < MAX_DO_LOOP_RETRY) {
                     continue;
                 }
@@ -2977,25 +3027,42 @@ public abstract class JobStoreSupport implements JobStore, Constants {
      * fire the given <code>Trigger</code>, that it had previously acquired
      * (reserved).
      * </p>
+     *
+     * 通知触发器不再计划触发它了。
+     *
      */
     public void releaseAcquiredTrigger(final OperableTrigger trigger) {
+        // 需要加 TRIGGER_ACCESS 锁（这里就是性能瓶颈了），外层可能会有循环调用此方法
         retryExecuteInNonManagedTXLock(
             LOCK_TRIGGER_ACCESS,
             new VoidTransactionCallback() {
                 public void executeVoid(Connection conn) throws JobPersistenceException {
+                    // 执行释放逻辑
                     releaseAcquiredTrigger(conn, trigger);
                 }
             });
     }
-    
+
+    /**
+     * 将触发器修改为ACQUIRED状态，并且从已出发列表中删除
+     * @param conn    Connection
+     * @param trigger OperableTrigger
+     * @throws JobPersistenceException
+     */
     protected void releaseAcquiredTrigger(Connection conn,
             OperableTrigger trigger)
         throws JobPersistenceException {
         try {
+            // 由于可能不支持job的并发执行，ACQUIRED的触发器的状态又有变成BLOCKED的可能，
+            // 所以该releaseAcquiredTrigger方法是操作QRTZ_TRIGGERS表，把ACQUIRED和BLOCKED的触发器的状态都改为WAITING。
+
+            // 首先修改将触发器从ACQUIRED修改为WAITING
             getDelegate().updateTriggerStateFromOtherState(conn,
                     trigger.getKey(), STATE_WAITING, STATE_ACQUIRED);
+            // 修改将触发器从BLOCKED修改为WAITING
             getDelegate().updateTriggerStateFromOtherState(conn,
                     trigger.getKey(), STATE_WAITING, STATE_BLOCKED);
+            // 将触发器从正在执行的表中删除 QRTZ_FIRED_TRIGGERS
             getDelegate().deleteFiredTrigger(conn, trigger.getFireInstanceId());
         } catch (SQLException e) {
             throw new JobPersistenceException(
@@ -3009,6 +3076,8 @@ public abstract class JobStoreSupport implements JobStore, Constants {
      * given <code>Trigger</code> (executing its associated <code>Job</code>),
      * that it had previously acquired (reserved).
      * </p>
+     *
+     * 执行点火操作，并包装为 TriggerFiredBundle 对象用于任务执行
      * 
      * @return null if the trigger or its job or calendar no longer exist, or
      *         if the trigger was not successfully put into the 'executing'
@@ -3016,6 +3085,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
      */
     @SuppressWarnings("unchecked")
     public List<TriggerFiredResult> triggersFired(final List<OperableTrigger> triggers) throws JobPersistenceException {
+        // TRIGGER_ACCESS 锁
         return executeInNonManagedTXLock(LOCK_TRIGGER_ACCESS,
                 new TransactionCallback<List<TriggerFiredResult>>() {
                     public List<TriggerFiredResult> execute(Connection conn) throws JobPersistenceException {
@@ -3024,6 +3094,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                         TriggerFiredResult result;
                         for (OperableTrigger trigger : triggers) {
                             try {
+                              // 执行点火操作，并包装为 TriggerFiredBundle 对象用于任务执行
                               TriggerFiredBundle bundle = triggerFired(conn, trigger);
                               result = new TriggerFiredResult(bundle);
                             } catch (JobPersistenceException jpe) {
@@ -3061,6 +3132,13 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                 });
     }
 
+    /**
+     * 单个任务执行点火操作，并包装为 TriggerFiredBundle 对象用于任务执行
+     * @param conn    Connection
+     * @param trigger OperableTrigger
+     * @return TriggerFiredBundle
+     * @throws JobPersistenceException
+     */
     protected TriggerFiredBundle triggerFired(Connection conn,
             OperableTrigger trigger)
         throws JobPersistenceException {
@@ -3069,6 +3147,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
 
         // Make sure trigger wasn't deleted, paused, or completed...
         try { // if trigger was deleted, state will be STATE_DELETED
+            // 查询触发器状态，如果不为 ACQUIRED 则一律返回 null
             String state = getDelegate().selectTriggerState(conn,
                     trigger.getKey());
             if (!state.equals(STATE_ACQUIRED)) {
@@ -3080,11 +3159,13 @@ public abstract class JobStoreSupport implements JobStore, Constants {
         }
 
         try {
+            // 获取任务详情
             job = retrieveJob(conn, trigger.getJobKey());
             if (job == null) { return null; }
         } catch (JobPersistenceException jpe) {
             try {
                 getLog().error("Error retrieving job, setting trigger state to ERROR.", jpe);
+                // 任务详情获取失败，则将当前触发器设置为 ERROR 状态
                 getDelegate().updateTriggerState(conn, trigger.getKey(),
                         STATE_ERROR);
             } catch (SQLException sqle) {
@@ -3093,26 +3174,31 @@ public abstract class JobStoreSupport implements JobStore, Constants {
             throw jpe;
         }
 
+        // 如果触发为日历类型，则需要去 QRTP_CALENDARS 中获取信息
         if (trigger.getCalendarName() != null) {
             cal = retrieveCalendar(conn, trigger.getCalendarName());
             if (cal == null) { return null; }
         }
 
         try {
+            // 更新当前的已发出列表中（QRTO_FIRED_TRIGGERS）触发器为 EXECUTING 状态
             getDelegate().updateFiredTrigger(conn, trigger, STATE_EXECUTING, job);
         } catch (SQLException e) {
             throw new JobPersistenceException("Couldn't insert fired trigger: "
                     + e.getMessage(), e);
         }
 
+        // 上次任务的触发时间
         Date prevFireTime = trigger.getPreviousFireTime();
 
         // call triggered - to update the trigger's next-fire-time state...
+        // 计算任务的下次执行时间（非本次，用于更新触发器的NEXT_FIRE_TIME字段）
         trigger.triggered(cal);
 
         String state = STATE_WAITING;
         boolean force = true;
-        
+
+        // 任务禁止并发
         if (job.isConcurrentExectionDisallowed()) {
             state = STATE_BLOCKED;
             force = false;
