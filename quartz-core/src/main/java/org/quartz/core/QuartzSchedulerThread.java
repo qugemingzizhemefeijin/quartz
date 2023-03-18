@@ -249,6 +249,7 @@ public class QuartzSchedulerThread extends Thread {
      */
     @Override
     public void run() {
+        // 这个里面在特殊情况下会与 org.quartz.impl.jdbcjobstore.JobStoreSupport.MisfireHandler 产生锁竞争。
         // QuartzScheduler调度线程不断获取trigger，触发trigger，释放trigger。
         int acquiresFailed = 0;
         // 只有调用了halt()方法，才会退出这个死循环
@@ -395,11 +396,12 @@ public class QuartzSchedulerThread extends Thread {
 
                         }
 
+                        // 循环将任务提交到工作线程中
                         for (int i = 0; i < bndles.size(); i++) {
                             TriggerFiredResult result =  bndles.get(i);
                             TriggerFiredBundle bndle =  result.getTriggerFiredBundle();
                             Exception exception = result.getException();
-
+                            // bndle为kong的话，都是exception不为空，肯定是在包装此类的时候发生了异常了。
                             if (exception instanceof RuntimeException) {
                                 getLog().error("RuntimeException while firing trigger " + triggers.get(i), exception);
                                 qsRsrcs.getJobStore().releaseAcquiredTrigger(triggers.get(i));
@@ -414,15 +416,18 @@ public class QuartzSchedulerThread extends Thread {
                                 continue;
                             }
 
+                            // 创建本地任务的执行脚本（JTAAnnotationAwareJobRunShellFactory）
                             JobRunShell shell = null;
                             try {
                                 shell = qsRsrcs.getJobRunShellFactory().createJobRunShell(bndle);
+                                // 这个方法会通过newInstance方法来初始化真正的Job实现的类，并存储到内部的 jec = JobExecutionContextImpl 字段中。
                                 shell.initialize(qs);
                             } catch (SchedulerException se) {
                                 qsRsrcs.getJobStore().triggeredJobComplete(triggers.get(i), bndle.getJobDetail(), CompletedExecutionInstruction.SET_ALL_JOB_TRIGGERS_ERROR);
                                 continue;
                             }
 
+                            // 将任务执行对象放入到线程池中执行（org.quartz.threadPool.class属性，默认位置为 SimpleThreadPool.class）
                             if (qsRsrcs.getThreadPool().runInThread(shell) == false) {
                                 // this case should never happen, as it is indicative of the
                                 // scheduler being shutdown or a bug in the thread pool or
@@ -440,6 +445,8 @@ public class QuartzSchedulerThread extends Thread {
                     // should never happen, if threadPool.blockForAvailableThreads() follows contract
                     continue; // while (!halted)
                 }
+
+                // 轮回完毕
 
                 long now = System.currentTimeMillis();
                 long waitTime = now + getRandomizedIdleWaitTime();

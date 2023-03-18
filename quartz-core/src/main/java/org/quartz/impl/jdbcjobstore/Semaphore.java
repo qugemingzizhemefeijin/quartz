@@ -38,7 +38,11 @@ public interface Semaphore {
      * Grants a lock on the identified resource to the calling thread (blocking
      * until it is available).
      *
-     * 将标识的资源上的锁授予调用线程（阻塞直到它可用）。
+     * <p>
+     *     将标识的资源上的锁授予调用线程（阻塞直到它可用）。
+     *     SELECT * FROM EB_QRTO_LOCKS WHERE SCHED_NAME = 'EB_ORD_SCHEDULER' AND LOCK_NAME = ? FOR UPDATE
+     *     [TRIGGER_ACCESS]
+     * </p>
      * 
      * @param conn Database connection used to establish lock.  Can be null if
      * <code>{@link #requiresConnection()}</code> returns false.

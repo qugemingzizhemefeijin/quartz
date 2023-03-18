@@ -124,6 +124,7 @@ public class JobRunShell extends SchedulerListenerSupport implements Runnable {
         JobDetail jobDetail = firedTriggerBundle.getJobDetail();
 
         try {
+            // 通过Class Name 反射调用构造函数创建调度任务的实例
             job = sched.getJobFactory().newJob(firedTriggerBundle, scheduler);
         } catch (SchedulerException se) {
             sched.notifySchedulerListenersError(
@@ -148,17 +149,22 @@ public class JobRunShell extends SchedulerListenerSupport implements Runnable {
     }
 
     public void run() {
+        // 将正在运行中的任务加入到监控器中（JobRunShell implements SchedulerListener）
         qs.addInternalSchedulerListener(this);
 
         try {
+            // 获取触发器
             OperableTrigger trigger = (OperableTrigger) jec.getTrigger();
+            // 获取任务详情
             JobDetail jobDetail = jec.getJobDetail();
 
             do {
 
                 JobExecutionException jobExEx = null;
+                // 获取业务实现的job任务类
                 Job job = jec.getJobInstance();
 
+                // 此处如果是 JTAJobRunShell 类的话，会开启事务
                 try {
                     begin();
                 } catch (SchedulerException se) {
@@ -170,6 +176,7 @@ public class JobRunShell extends SchedulerListenerSupport implements Runnable {
 
                 // notify job & trigger listeners...
                 try {
+                    // 这个看着好像没用上
                     if (!notifyListenersBeginning(jec)) {
                         break;
                     }
@@ -180,6 +187,7 @@ public class JobRunShell extends SchedulerListenerSupport implements Runnable {
                         
                         // QTZ-205
                         // Even if trigger got vetoed, we still needs to check to see if it's the trigger's finalized run or not.
+                        // 即时触发器被否决了，也需要检查是否此触发器已经完成
                         if (jec.getTrigger().getNextFireTime() == null) {
                             qs.notifySchedulerListenersFinalized(jec.getTrigger());
                         }
@@ -199,6 +207,7 @@ public class JobRunShell extends SchedulerListenerSupport implements Runnable {
                 // execute the job
                 try {
                     log.debug("Calling execute on job " + jobDetail.getKey());
+                    // 真正执行用户的任务
                     job.execute(jec);
                     endTime = System.currentTimeMillis();
                 } catch (JobExecutionException jee) {
@@ -218,6 +227,7 @@ public class JobRunShell extends SchedulerListenerSupport implements Runnable {
                     jobExEx = new JobExecutionException(se, false);
                 }
 
+                // 设置任务执行耗时
                 jec.setJobRunTime(endTime - startTime);
 
                 // notify all job listeners
@@ -229,6 +239,7 @@ public class JobRunShell extends SchedulerListenerSupport implements Runnable {
 
                 // update the trigger
                 try {
+                    // 生成触发器是否可以删除，重新执行，完成等动后续作
                     instCode = trigger.executionComplete(jec, jobExEx);
                 } catch (Exception e) {
                     // If this happens, there's a bug in the trigger...
@@ -266,11 +277,13 @@ public class JobRunShell extends SchedulerListenerSupport implements Runnable {
                     continue;
                 }
 
+                // 通知当前的触发器任务已经执行完毕了
                 qs.notifyJobStoreJobComplete(trigger, jobDetail, instCode);
                 break;
             } while (true);
 
         } finally {
+            // 任务执行完毕，从监控集合中移除
             qs.removeInternalSchedulerListener(this);
         }
     }
@@ -335,6 +348,12 @@ public class JobRunShell extends SchedulerListenerSupport implements Runnable {
         return true;
     }
 
+    /**
+     * 通知监听器，任务执行完毕了
+     * @param jobExCtxt 当前任务的执行环境对象
+     * @param jobExEx   如果有异常的话，会传入异常对象
+     * @return 当执行没有任何问题，返回true
+     */
     private boolean notifyJobListenersComplete(JobExecutionContext jobExCtxt, JobExecutionException jobExEx) {
         try {
             qs.notifyJobListenersWasExecuted(jobExCtxt, jobExEx);

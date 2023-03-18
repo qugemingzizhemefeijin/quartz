@@ -431,6 +431,7 @@ public class SimpleThreadPool implements ThreadPool {
             handoffPending = true;
 
             // Wait until a worker thread is available
+            // 如果没有可用工作线程，则等待一下。
             while ((availWorkers.size() < 1) && !isShutdown) {
                 try {
                     nextRunnableLock.wait(500);
@@ -439,12 +440,16 @@ public class SimpleThreadPool implements ThreadPool {
             }
 
             if (!isShutdown) {
+                // 获取一个空闲的工作者
                 WorkerThread wt = (WorkerThread)availWorkers.removeFirst();
+                // 加入到忙碌的工作者集合
                 busyWorkers.add(wt);
+                // 将调度任务提交给工作者去忙活
                 wt.run(runnable);
             } else {
                 // If the thread pool is going down, execute the Runnable
                 // within a new additional worker thread (no thread from the pool).
+                // 如果线程是被关闭了，则直接启动一个新的线程来执行调度任务
                 WorkerThread wt = new WorkerThread(this, threadGroup,
                         "WorkerThread-LastJob", prio, isMakeThreadsDaemons(), runnable);
                 busyWorkers.add(wt);
@@ -562,6 +567,7 @@ public class SimpleThreadPool implements ThreadPool {
                 }
 
                 runnable = newRunnable;
+                // 唤醒自己，执行run方法
                 lock.notifyAll();
             }
         }
@@ -578,13 +584,14 @@ public class SimpleThreadPool implements ThreadPool {
             while (run.get()) {
                 try {
                     synchronized(lock) {
+                        // 没有任务，则等待500ms
                         while (runnable == null && run.get()) {
                             lock.wait(500);
                         }
 
                         if (runnable != null) {
                             ran = true;
-                            runnable.run();
+                            runnable.run(); // 执行 JobRunShell 的方法
                         }
                     }
                 } catch (InterruptedException unblock) {

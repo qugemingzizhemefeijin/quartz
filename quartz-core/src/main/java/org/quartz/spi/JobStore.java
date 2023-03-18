@@ -626,6 +626,10 @@ public interface JobStore {
      * and that the <code>{@link org.quartz.JobDataMap}</code>
      * in the given <code>JobDetail</code> should be updated if the <code>Job</code>
      * is stateful.
+     *
+     * <p>
+     *     触发器执行完毕
+     * </p>
      */
     void triggeredJobComplete(OperableTrigger trigger, JobDetail jobDetail, CompletedExecutionInstruction triggerInstCode);
 

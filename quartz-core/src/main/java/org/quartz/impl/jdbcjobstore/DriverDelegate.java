@@ -131,14 +131,20 @@ public interface DriverDelegate {
      * misfired - according to the given timestamp.  No more than count will
      * be returned.
      * </p>
+     *
+     * <p>
+     *     查询过期的任务（等待状态）
+     *     SELECT TRIGGER_NAME, TRIGGER_GROUP FROM QRTO_TRIGGERS WHERE SCHED_NAME = 'ORD_SCHEDULER' AND NOT (MISFIRE_INSTR = -1) AND NEXT_FIRE_TIME < ? AND TRIGGER_STATE = ? ORDER BY NEXT_FIRE_TIME ASC, PRIORITY DESC
+     *     [1672204064689, WAITING]
+     * </p>
      * 
      * @param conn the DB Connection
-     * @param count the most misfired triggers to return, negative for all
+     * @param count the most misfired triggers to return, negative for all，-1则获取所有
      * @param resultList Output parameter.  A List of 
      *      <code>{@link org.quartz.utils.Key}</code> objects.  Must not be null.
      *          
      * @return Whether there are more misfired triggers left to find beyond
-     *         the given count.
+     *         the given count. 返回是否还有更多的过期任务
      */
     boolean hasMisfiredTriggersInState(Connection conn, String state1, 
         long ts, int count, List<TriggerKey> resultList) throws SQLException;
@@ -147,6 +153,12 @@ public interface DriverDelegate {
      * <p>
      * Get the number of triggers in the given state that have
      * misfired - according to the given timestamp.
+     * </p>
+     *
+     * <p>
+     *     查询已经过期的触发器数量
+     *     SELECT COUNT(TRIGGER_NAME) FROM QRTO_TRIGGERS WHERE SCHED_NAME = 'ORD_SCHEDULER' AND NOT (MISFIRE_INSTR = -1) AND NEXT_FIRE_TIME < ? AND TRIGGER_STATE = ?
+     *     [1672204064589, WAITING]
      * </p>
      * 
      * @param conn the DB Connection
@@ -307,6 +319,10 @@ public interface DriverDelegate {
      * <p>
      * Update the job data map for the given job.
      * </p>
+     *
+     * <p>
+     *     PDATE {0}JOB_DETAILS SET JOB_DATA = ?  WHERE SCHED_NAME = {1} AND JOB_NAME = ? AND JOB_GROUP = ?
+     * </p>
      * 
      * @param conn
      *          the DB Connection
@@ -398,6 +414,12 @@ public interface DriverDelegate {
      * <p>
      * Update the base trigger data.
      * </p>
+     *
+     * <p>
+     *     更新触发器的信息
+     *     UPDATE QRTO_TRIGGERS SET JOB_NAME = ?, JOB_GROUP = ?, DESCRIPTION = ?, NEXT_FIRE_TIME = ?, PREV_FIRE_TIME = ?, TRIGGER_STATE = ?, TRIGGER_TYPE = ?, START_TIME = ?, END_TIME = ?, CALENDAR_NAME = ?, MISFIRE_INSTR = ?, PRIORITY = ? WHERE SCHED_NAME = 'EB_ORD_SCHEDULER' AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
+     *     [xxxx_UUID_2936080e-eebe-49ec-9876-00900f806abb_0, dynamicGroup, null, 1672204365948, -1, WAITING, SIMPLE, 1672189026572, 0, null, 0, 5, xxxx_UUID_2936080e-eebe-49ec-9876-00900f806abb_0, dynamicGroup]
+     * </p>
      * 
      * @param conn
      *          the DB Connection
@@ -414,6 +436,11 @@ public interface DriverDelegate {
      * <p>
      * Check whether or not a trigger exists.
      * </p>
+     *
+     * <p>
+     *     判断触发器是否存在
+     *     SELECT TRIGGER_NAME FROM {0}TRIGGERS WHERE SCHED_NAME = {1} AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
+     * </p>
      * 
      * @param conn
      *          the DB Connection
@@ -425,6 +452,11 @@ public interface DriverDelegate {
     /**
      * <p>
      * Update the state for a given trigger.
+     * </p>
+     *
+     * <p>
+     *     根据触发器名称更新触发器状态为指定的状态
+     *     UPDATE QRTO_TRIGGERS SET TRIGGER_STATE = ? WHERE SCHED_NAME = 'ORD_SCHEDULER' AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
      * </p>
      * 
      * @param conn
@@ -532,7 +564,12 @@ public interface DriverDelegate {
      * <p>
      * Update the states of all triggers associated with the given job.
      * </p>
-     * 
+     *
+     * <p>
+     *     根据Job名称更新所有的触发器状态为指定状态
+     *     UPDATE {0}TRIGGERS SET TRIGGER_STATE = ? WHERE SCHED_NAME = {1} AND JOB_NAME = ? AND JOB_GROUP = ?
+     * </p>
+     *
      * @param conn
      *          the DB Connection
      * 
@@ -547,6 +584,11 @@ public interface DriverDelegate {
      * <p>
      * Update the states of any triggers associated with the given job, that
      * are the given current state.
+     * </p>
+     *
+     * <p>
+     *     根据任务名称将触发器状态从A改成B
+     *     UPDATE {0}TRIGGERS SET TRIGGER_STATE = ? WHERE SCHED_NAME = {1} AND JOB_NAME = ? AND JOB_GROUP = ? AND TRIGGER_STATE = ?
      * </p>
      * 
      * @param conn
@@ -566,6 +608,11 @@ public interface DriverDelegate {
      * <p>
      * Delete the base trigger data for a trigger.
      * </p>
+     *
+     * <p>
+     *     删除触发器
+     *     DELETE FROM {0}TRIGGERS WHERE SCHED_NAME = {1} AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
+     * </p>
      * 
      * @param conn
      *          the DB Connection
@@ -577,6 +624,11 @@ public interface DriverDelegate {
     /**
      * <p>
      * Select the number of triggers associated with a given job.
+     * </p>
+     *
+     * <p>
+     *     查看指定触发器的数量
+     *     SELECT COUNT(TRIGGER_NAME) FROM QRTO_TRIGGERS WHERE SCHED_NAME = 'ORD_SCHEDULER' AND JOB_NAME = ? AND JOB_GROUP = ?
      * </p>
      * 
      * @param conn
@@ -604,6 +656,10 @@ public interface DriverDelegate {
      * <p>
      * Select the job to which the trigger is associated. Allow option to load actual job class or not. When case of
      * remove, we do not need to load the class, which in many cases, it's no longer exists.
+     * </p>
+     *
+     * <p>
+     *     根据触发器的名称查询任务详情
      * </p>
      */
     public JobDetail selectJobForTrigger(Connection conn, ClassLoadHelper loadHelper,
@@ -644,6 +700,11 @@ public interface DriverDelegate {
     /**
      * <p>
      * Select a trigger.
+     * </p>
+     *
+     * <p>
+     *     SELECT * FROM QRTP_TRIGGERS WHERE SCHED_NAME = 'XX_SCHEDULER' AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
+     *     [xxx_UUID_28aa0d8e-393e-4f47-83fa-1f126832e8b5_0, commonGroup]
      * </p>
      * 
      * @param conn
@@ -688,6 +749,10 @@ public interface DriverDelegate {
     /**
      * <p>
      * Select a trigger' status (state & next fire time).
+     * </p>
+     *
+     * <p>
+     *     查询当前触发器的状态，下次触发时间，名称和分组
      * </p>
      * 
      * @param conn
@@ -828,6 +893,10 @@ public interface DriverDelegate {
     /**
      * <p>
      * Select a calendar.
+     * </p>
+     *
+     * <p>
+     *     SELECT * FROM QRTP_CALENDARS WHERE SCHED_NAME = {1} AND CALENDAR_NAME = ?
      * </p>
      * 
      * @param conn
@@ -1052,6 +1121,10 @@ public interface DriverDelegate {
     /**
      * <p>
      * Delete a fired trigger.
+     * </p>
+     *
+     * <p>
+     *     DELETE FROM {0}FIRED_TRIGGERS WHERE SCHED_NAME = {1} AND ENTRY_ID = ?
      * </p>
      * 
      * @param conn

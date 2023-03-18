@@ -53,6 +53,10 @@ public interface JobFactory {
      * intervention (e.g. an application restart after fixing whatever 
      * configuration problem led to the issue wih instantiating the Job. 
      * </p>
+     *
+     * <p>
+     * 根据任务信息来创建对应的任务实例，如 DynamicJob implements Job，就会调用 DynamicJob.class的 newInstance()来初始化对象。
+     * </p>
      * 
      * @param bundle
      *            The TriggerFiredBundle from which the <code>JobDetail</code>

@@ -1264,10 +1264,12 @@ public class StdSchedulerFactory implements SchedulerFactory {
             if (userTXLocation != null) {
                 UserTransactionHelper.setUserTxLocation(userTXLocation);
             }
-    
+
+            // 执行任务的时候开启事务，默认是false
             if (wrapJobInTx) {
                 jrsf = new JTAJobRunShellFactory();
             } else {
+                // 只有指定了 ExecuteInJTATransaction 注解的时候，才开启事务。默认是此类
                 jrsf = new JTAAnnotationAwareJobRunShellFactory();
             }
     

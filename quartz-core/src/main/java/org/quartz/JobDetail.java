@@ -48,6 +48,10 @@ import java.io.Serializable;
  */
 public interface JobDetail extends Serializable, Cloneable {
 
+    /**
+     * Name + Group 组合而成
+     * @return
+     */
     public JobKey getKey();
 
     /**
@@ -90,6 +94,17 @@ public interface JobDetail extends Serializable, Cloneable {
     public boolean isDurable();
 
     /**
+     *
+     * <p>
+     *     告诉Quartz在成功执行了Job实现类的execute方法后（没有发生任何异常），更新JobDetail中JobDataMap的数据，
+     *     使得该JobDetail实例在下一次执行的时候，JobDataMap中是更新后的数据，而不是更新前的旧数据。
+     * </p>
+     *
+     * <p>
+     *     如果你使用了@PersistJobDataAfterExecution注解，则强烈建议你同时使用@DisallowConcurrentExecution注解，
+     *     因为当同一个job（JobDetail）的两个实例被并发执行时，由于竞争，JobDataMap中存储的数据很可能是不确定的。
+     * </p>
+     *
      * @see PersistJobDataAfterExecution
      * @return whether the associated Job class carries the {@link PersistJobDataAfterExecution} annotation.
      */

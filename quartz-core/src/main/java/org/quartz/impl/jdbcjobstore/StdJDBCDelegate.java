@@ -359,6 +359,10 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         ResultSet rs = null;
 
         try {
+            // SELECT TRIGGER_NAME, TRIGGER_GROUP FROM EB_QRTO_TRIGGERS
+            // WHERE
+            // SCHED_NAME = 'ORD_SCHEDULER' AND NOT (MISFIRE_INSTR = -1) AND NEXT_FIRE_TIME < ? AND TRIGGER_STATE = ?
+            // ORDER BY NEXT_FIRE_TIME ASC, PRIORITY DESC
             ps = conn.prepareStatement(rtp(SELECT_HAS_MISFIRED_TRIGGERS_IN_STATE));
             ps.setBigDecimal(1, new BigDecimal(String.valueOf(ts)));
             ps.setString(2, state1);
@@ -396,6 +400,8 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         ResultSet rs = null;
 
         try {
+            // SELECT COUNT(TRIGGER_NAME) FROM QRTO_TRIGGERS WHERE SCHED_NAME = 'ORD_SCHEDULER' AND NOT (MISFIRE_INSTR = -1) AND NEXT_FIRE_TIME < ? AND TRIGGER_STATE = ?
+            // [1672204064589, WAITING]
             ps = conn.prepareStatement(rtp(COUNT_MISFIRED_TRIGGERS_IN_STATE));
             ps.setBigDecimal(1, new BigDecimal(String.valueOf(ts)));
             ps.setString(2, state1);
@@ -716,6 +722,10 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
      * <p>
      * Delete the job detail record for the given job.
      * </p>
+     *
+     * <p>
+     *     删除任务详情
+     * </p>
      * 
      * @param conn
      *          the DB Connection
@@ -726,6 +736,8 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         PreparedStatement ps = null;
 
         try {
+            // DELETE FROM QRTO_JOB_DETAILS WHERE SCHED_NAME = 'ORD_SCHEDULER' AND JOB_NAME = ? AND JOB_GROUP = ?
+            // [xxxx_UUID_2899b075-06b3-45b6-b088-c943d3063f30_0, dynamicGroup]
             if (logger.isDebugEnabled()) {
                 logger.debug("Deleting job: " + jobKey);
             }
@@ -1298,6 +1310,11 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
      * <p>
      * Check whether or not a trigger exists.
      * </p>
+     *
+     * <p>
+     *     判断触发器是否存在
+     *     SELECT TRIGGER_NAME FROM {0}TRIGGERS WHERE SCHED_NAME = {1} AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
+     * </p>
      * 
      * @param conn
      *          the DB Connection
@@ -1542,6 +1559,7 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         PreparedStatement ps = null;
 
         try {
+            // UPDATE {0}TRIGGERS SET TRIGGER_STATE = ? WHERE SCHED_NAME = {1} AND JOB_NAME = ? AND JOB_GROUP = ? AND TRIGGER_STATE = ?
             ps = conn
                     .prepareStatement(rtp(UPDATE_JOB_TRIGGER_STATES_FROM_OTHER_STATE));
             ps.setString(1, state);
@@ -1568,6 +1586,7 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         PreparedStatement ps = null;
 
         try {
+            // ELETE FROM {0}BLOB_TRIGGERS WHERE SCHED_NAME = {1} AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
             ps = conn.prepareStatement(rtp(DELETE_BLOB_TRIGGER));
             ps.setString(1, triggerKey.getName());
             ps.setString(2, triggerKey.getGroup());
@@ -1582,6 +1601,10 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
      * <p>
      * Delete the base trigger data for a trigger.
      * </p>
+     *
+     * <p>
+     *     DELETE FROM {0}TRIGGERS WHERE SCHED_NAME = {1} AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
+     * </p>
      * 
      * @param conn
      *          the DB Connection
@@ -1590,9 +1613,12 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
     public int deleteTrigger(Connection conn, TriggerKey triggerKey) throws SQLException {
         PreparedStatement ps = null;
 
+        // 从  QRTZ_SIMPLE_TRIGGERS,QRTZ_CRON_TRIGGERS,QRTZ_BLOG_TRIGGERS中删除数据对应的数据
         deleteTriggerExtension(conn, triggerKey);
         
         try {
+            // 从触发器表删除
+            // DELETE FROM {0}TRIGGERS WHERE SCHED_NAME = {1} AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
             ps = conn.prepareStatement(rtp(DELETE_TRIGGER));
             ps.setString(1, triggerKey.getName());
             ps.setString(2, triggerKey.getGroup());
@@ -1627,6 +1653,8 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         ResultSet rs = null;
 
         try {
+            // SELECT COUNT(TRIGGER_NAME) FROM QRTO_TRIGGERS WHERE SCHED_NAME = 'ORD_SCHEDULER' AND JOB_NAME = ? AND JOB_GROUP = ?
+            // [xxxx_UUID_2899b075-06b3-45b6-b088-c943d3063f30_0, dynamicGroup]
             ps = conn.prepareStatement(rtp(SELECT_NUM_TRIGGERS_FOR_JOB));
             ps.setString(1, jobKey.getName());
             ps.setString(2, jobKey.getGroup());
@@ -1666,6 +1694,10 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
      * remove, we do not need to load the class, which in many cases, it's no longer exists.
      *
      * </p>
+     *
+     * <p>
+     *     根据触发器的名称查询任务详情
+     * </p>
      * 
      * @param conn
      *          the DB Connection
@@ -1680,6 +1712,8 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         ResultSet rs = null;
 
         try {
+            //  SELECT J.JOB_NAME, J.JOB_GROUP, J.IS_DURABLE, J.JOB_CLASS_NAME, J.REQUESTS_RECOVERY FROM QRTO_TRIGGERS T, QRTO_JOB_DETAILS J WHERE T.SCHED_NAME = 'ORD_SCHEDULER' AND J.SCHED_NAME = 'ORD_SCHEDULER' AND T.TRIGGER_NAME = ? AND T.TRIGGER_GROUP = ? AND T.JOB_NAME = J.JOB_NAME AND T.JOB_GROUP = J.JOB_GROUP
+            // [xxx_UUID_2899b075-06b3-45b6-b088-c943d3063f30_0, dynamicGroup]
             ps = conn.prepareStatement(rtp(SELECT_JOB_FOR_TRIGGER));
             ps.setString(1, triggerKey.getName());
             ps.setString(2, triggerKey.getGroup());
@@ -2012,6 +2046,10 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
      * <p>
      * Select a trigger' status (state & next fire time).
      * </p>
+     *
+     * <p>
+     *     查询当前触发器的状态，下次触发时间，名称和分组
+     * </p>
      * 
      * @param conn
      *          the DB Connection
@@ -2025,6 +2063,8 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         try {
             TriggerStatus status = null;
 
+            // SELECT TRIGGER_STATE, NEXT_FIRE_TIME, JOB_NAME, JOB_GROUP FROM QRTO_TRIGGERS WHERE SCHED_NAME = 'ORD_SCHEDULER' AND TRIGGER_NAME = ? AND TRIGGER_GROUP = ?
+            // [xxxx_UUID_2899b075-06b3-45b6-b088-c943d3063f30_0, dynamicGroup]
             ps = conn.prepareStatement(rtp(SELECT_TRIGGER_STATUS));
             ps.setString(1, triggerKey.getName());
             ps.setString(2, triggerKey.getGroup());
@@ -2995,6 +3035,7 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         throws SQLException {
         PreparedStatement ps = null;
         try {
+            // DELETE FROM {0}FIRED_TRIGGERS WHERE SCHED_NAME = {1} AND ENTRY_ID = ?
             ps = conn.prepareStatement(rtp(DELETE_FIRED_TRIGGER));
             ps.setString(1, entryId);
 

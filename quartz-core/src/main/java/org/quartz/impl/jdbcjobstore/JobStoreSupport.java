@@ -137,6 +137,9 @@ public abstract class JobStoreSupport implements JobStore, Constants {
 
     private SchedulerSignaler schedSignaler;
 
+    /**
+     * misfire扫描的时候一次获取最多的触发器数量，默认：20
+     */
     protected int maxToRecoverAtATime = 20;
     
     private boolean setTxIsolationLevelSequential = false;
@@ -718,6 +721,8 @@ public abstract class JobStoreSupport implements JobStore, Constants {
             }
         }
 
+        // 初始化 Misfire处理器，创建 Misfire 线程（这个地方可能会严重的影响性能，
+        // 特别是如果没有配置 org.quartz.scheduler.batchTriggerAcquisitionMaxCount 此参数的话.）
         misfireHandler = new MisfireHandler();
         if(initializersLoader != null)
             misfireHandler.setContextClassLoader(initializersLoader);
@@ -946,9 +951,20 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     protected static class RecoverMisfiredJobsResult {
         public static final RecoverMisfiredJobsResult NO_OP =
             new RecoverMisfiredJobsResult(false, 0, Long.MAX_VALUE);
-        
+
+        /**
+         * 是否有更多的过期触发器
+         */
         private boolean _hasMoreMisfiredTriggers;
+
+        /**
+         * 本次更新的触发器数量
+         */
         private int _processedMisfiredTriggerCount;
+
+        /**
+         * 最早的一个nextFireTime
+         */
         private long _earliestNewTime;
         
         public RecoverMisfiredJobsResult(
@@ -968,16 +984,26 @@ public abstract class JobStoreSupport implements JobStore, Constants {
             return _earliestNewTime;
         } 
     }
-    
+
+    /**
+     * 恢复过期的任务
+     * @param conn       Connection
+     * @param recovering 启动恢复的时候，传入true.
+     * @return RecoverMisfiredJobsResult
+     * @throws JobPersistenceException
+     * @throws SQLException
+     */
     protected RecoverMisfiredJobsResult recoverMisfiredJobs(
         Connection conn, boolean recovering)
         throws JobPersistenceException, SQLException {
 
         // If recovering, we want to handle all of the misfired
         // triggers right away.
+        // 是否处理所有的过期的触发器，getMaxMisfiresToHandleAtATime()最多一次处理20个，-1则所有。
         int maxMisfiresToHandleAtATime = 
             (recovering) ? -1 : getMaxMisfiresToHandleAtATime();
-        
+
+        // 用户存储查询出来的触发器
         List<TriggerKey> misfiredTriggers = new LinkedList<TriggerKey>();
         long earliestNewTime = Long.MAX_VALUE;
         // We must still look for the MISFIRED state in case triggers were left 
@@ -987,6 +1013,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                 conn, STATE_WAITING, getMisfireTime(), 
                 maxMisfiresToHandleAtATime, misfiredTriggers);
 
+        // 如果还有更多的过期任务，会打印一些信息出来
         if (hasMoreMisfiredTriggers) {
             getLog().info(
                 "Handling the first " + misfiredTriggers.size() +
@@ -1003,7 +1030,8 @@ public abstract class JobStoreSupport implements JobStore, Constants {
         }
 
         for (TriggerKey triggerKey: misfiredTriggers) {
-            
+
+            // 获取触发器信息
             OperableTrigger trig = 
                 retrieveTrigger(conn, triggerKey);
 
@@ -1011,8 +1039,10 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                 continue;
             }
 
+            // 更新触发器的NextFireTime
             doUpdateOfMisfiredTrigger(conn, trig, false, STATE_WAITING, recovering);
 
+            // 获取所有更新的触发器中最高的一个nextFireTime
             if(trig.getNextFireTime() != null && trig.getNextFireTime().getTime() < earliestNewTime)
                 earliestNewTime = trig.getNextFireTime().getTime();
         }
@@ -1047,6 +1077,15 @@ public abstract class JobStoreSupport implements JobStore, Constants {
         }
     }
 
+    /**
+     * 更新触发器的nextFireTime时间等动作
+     * @param conn                  Connection
+     * @param trig                  OperableTrigger
+     * @param forceState            是否强制更新状态，如果传入false，还需要一系列的检查动作
+     * @param newStateIfNotComplete 新增状态
+     * @param recovering            是否是恢复中（启动的时候传入true，中间的延期扫描则是false）
+     * @throws JobPersistenceException
+     */
     private void doUpdateOfMisfiredTrigger(Connection conn, OperableTrigger trig, boolean forceState, String newStateIfNotComplete, boolean recovering) throws JobPersistenceException {
         Calendar cal = null;
         if (trig.getCalendarName() != null) {
@@ -1055,13 +1094,16 @@ public abstract class JobStoreSupport implements JobStore, Constants {
 
         schedSignaler.notifyTriggerListenersMisfired(trig);
 
+        // 更新NextFireTime
         trig.updateAfterMisfire(cal);
 
         if (trig.getNextFireTime() == null) {
+            // 保存为 COMPLETE
             storeTrigger(conn, trig,
                 null, true, STATE_COMPLETE, forceState, recovering);
             schedSignaler.notifySchedulerListenersFinalized(trig);
         } else {
+            // 保存未 WAITING
             storeTrigger(conn, trig, null, true, newStateIfNotComplete,
                     forceState, recovering);
         }
@@ -1201,15 +1243,17 @@ public abstract class JobStoreSupport implements JobStore, Constants {
             boolean forceState, boolean recovering)
         throws JobPersistenceException {
 
+        // 判断触发器是否存在
         boolean existingTrigger = triggerExists(conn, newTrigger.getKey());
 
+        // 如果不让替换，并且触发器存在，就报错。
         if ((existingTrigger) && (!replaceExisting)) { 
             throw new ObjectAlreadyExistsException(newTrigger); 
         }
         
         try {
 
-            boolean shouldBepaused;
+            boolean shouldBepaused; // 是否应该暂停
 
             if (!forceState) {
                 shouldBepaused = getDelegate().isTriggerGroupPaused(
@@ -1238,10 +1282,13 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                         + ") referenced by the trigger does not exist.");
             }
 
+            // 如果不允许并发任务，并且是非恢复状态下，则需要检查当前的任务的状态，没有进入到FIRED_TRIGGERS表则原样返回，
+            // 否则将其设置为阻塞状态。
             if (job.isConcurrentExectionDisallowed() && !recovering) { 
                 state = checkBlockedState(conn, job.getKey(), state);
             }
-            
+
+            // 存在则更新，否则插入
             if (existingTrigger) {
                 getDelegate().updateTrigger(conn, newTrigger, state, job);
             } else {
@@ -1367,6 +1414,10 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     
     /**
      * Delete a job and its listeners.
+     *
+     * <p>
+     *     删除Job信息
+     * </p>
      * 
      * @see #removeJob(java.sql.Connection, org.quartz.JobKey)
      * @see #removeTrigger(Connection, TriggerKey)
@@ -1379,6 +1430,10 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     
     /**
      * Delete a trigger, its listeners, and its Simple/Cron/BLOB sub-table entry.
+     *
+     * <p>
+     *     从QRTZ_SIMPLE_TRIGGERS,QRTZ_CRON_TRIGGERS,QRTZ_BLOG_TRIGGERS,QRTZ_TRIGGERS中删除所有Trigger相关的数据
+     * </p>
      * 
      * @see #removeJob(java.sql.Connection, org.quartz.JobKey)
      * @see #removeTrigger(Connection, TriggerKey)
@@ -1464,24 +1519,35 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                     }
                 });
     }
-    
+
+    /**
+     * 删除触发器（包括QRTZ_CRON_TRIGGERS、QRTZ_BLOG_TRIGGERS、QRTZ_TRIGGERS、QRTZ_JOB_DETAILS）相关的表信息
+     * @param conn Connection
+     * @param key  TriggerKey
+     * @return boolean
+     * @throws JobPersistenceException
+     */
     protected boolean removeTrigger(Connection conn, TriggerKey key)
         throws JobPersistenceException {
         boolean removedTrigger;
         try {
             // this must be called before we delete the trigger, obviously
+            // 查询任务详情
             JobDetail job = getDelegate().selectJobForTrigger(conn,
                     getClassLoadHelper(), key, false);
 
+            // 删除触发器
             removedTrigger = 
                 deleteTriggerAndChildren(conn, key);
 
             if (null != job && !job.isDurable()) {
+
                 int numTriggers = getDelegate().selectNumTriggersForJob(conn,
                         job.getKey());
                 if (numTriggers == 0) {
                     // Don't call removeJob() because we don't want to check for
                     // triggers again.
+                    // 删除Job信息
                     deleteJobAndChildren(conn, job.getKey());
                 }
             }
@@ -3238,6 +3304,10 @@ public abstract class JobStoreSupport implements JobStore, Constants {
      * in the given <code>JobDetail</code> should be updated if the <code>Job</code>
      * is stateful.
      * </p>
+     *
+     * <p>
+     *     触发器执行完毕
+     * </p>
      */
     public void triggeredJobComplete(final OperableTrigger trigger,
             final JobDetail jobDetail, final CompletedExecutionInstruction triggerInstCode) {
@@ -3249,11 +3319,20 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                 }
             });    
     }
-    
+
+    /**
+     * 触发器执行完成需要操作的流程
+     * @param conn            数据库连接
+     * @param trigger         触发器对象
+     * @param jobDetail       任务详情
+     * @param triggerInstCode 后续的动作
+     * @throws JobPersistenceException
+     */
     protected void triggeredJobComplete(Connection conn,
             OperableTrigger trigger, JobDetail jobDetail,
             CompletedExecutionInstruction triggerInstCode) throws JobPersistenceException {
         try {
+            // 删除触发器动作
             if (triggerInstCode == CompletedExecutionInstruction.DELETE_TRIGGER) {
                 if(trigger.getNextFireTime() == null) { 
                     // double check for possible reschedule within job 
@@ -3268,37 +3347,45 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                     signalSchedulingChangeOnTxCompletion(0L);
                 }
             } else if (triggerInstCode == CompletedExecutionInstruction.SET_TRIGGER_COMPLETE) {
+                // 更新触发器状态为完成
                 getDelegate().updateTriggerState(conn, trigger.getKey(),
                         STATE_COMPLETE);
                 signalSchedulingChangeOnTxCompletion(0L);
             } else if (triggerInstCode == CompletedExecutionInstruction.SET_TRIGGER_ERROR) {
                 getLog().info("Trigger " + trigger.getKey() + " set to ERROR state.");
+                // 更耐心触发器状态为错误
                 getDelegate().updateTriggerState(conn, trigger.getKey(),
                         STATE_ERROR);
                 signalSchedulingChangeOnTxCompletion(0L);
             } else if (triggerInstCode == CompletedExecutionInstruction.SET_ALL_JOB_TRIGGERS_COMPLETE) {
+                // 根据JobKey更新触发器为完成状态
                 getDelegate().updateTriggerStatesForJob(conn,
                         trigger.getJobKey(), STATE_COMPLETE);
                 signalSchedulingChangeOnTxCompletion(0L);
             } else if (triggerInstCode == CompletedExecutionInstruction.SET_ALL_JOB_TRIGGERS_ERROR) {
                 getLog().info("All triggers of Job " + 
                         trigger.getKey() + " set to ERROR state.");
+                // 根据JobKey更新触发器为错误状态
                 getDelegate().updateTriggerStatesForJob(conn,
                         trigger.getJobKey(), STATE_ERROR);
                 signalSchedulingChangeOnTxCompletion(0L);
             }
 
+            // 判断是否不允许并发
             if (jobDetail.isConcurrentExectionDisallowed()) {
+                // 将阻塞状态下的任务改成等待状态
                 getDelegate().updateTriggerStatesForJobFromOtherState(conn,
                         jobDetail.getKey(), STATE_WAITING,
                         STATE_BLOCKED);
 
+                // 将暂停并阻塞状态下的任务改成暂停状态
                 getDelegate().updateTriggerStatesForJobFromOtherState(conn,
                         jobDetail.getKey(), STATE_PAUSED,
                         STATE_PAUSED_BLOCKED);
 
                 signalSchedulingChangeOnTxCompletion(0L);
             }
+            // 查看是否要求在任务执行完毕之后更新JobDataMap数据
             if (jobDetail.isPersistJobDataAfterExecution()) {
                 try {
                     if (jobDetail.getJobDataMap().isDirty()) {
@@ -3318,6 +3405,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
         }
 
         try {
+            // 从 QRTZ_FIRED_TRIGGERS 中删除数据
             getDelegate().deleteFiredTrigger(conn, trigger.getFireInstanceId());
         } catch (SQLException e) {
             throw new JobPersistenceException("Couldn't delete fired trigger: "
@@ -3369,6 +3457,11 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     // Management methods
     //---------------------------------------------------------------------------
 
+    /**
+     * 恢复所有已经Misfire的触发器
+     * @return RecoverMisfiredJobsResult
+     * @throws JobPersistenceException
+     */
     protected RecoverMisfiredJobsResult doRecoverMisfires() throws JobPersistenceException {
         boolean transOwner = false;
         Connection conn = getNonManagedTXConnection();
@@ -3378,6 +3471,8 @@ public abstract class JobStoreSupport implements JobStore, Constants {
             // Before we make the potentially expensive call to acquire the 
             // trigger lock, peek ahead to see if it is likely we would find
             // misfired triggers requiring recovery.
+            // 根据 doubleCheckLockMisfireHandler 属性决定是否查询数据库中已经 过期的 触发器数量
+            // 如果为false，则每次都加锁。否则只有有过期的触发器才加锁处理
             int misfireCount = (getDoubleCheckLockMisfireHandler()) ?
                 getDelegate().countMisfiredTriggersInState(
                     conn, STATE_WAITING, getMisfireTime()) : 
@@ -4135,11 +4230,12 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     //
     /////////////////////////////////////////////////////////////////////////////
 
+    // 这个线程会将过期的触发器执行修改下次触发时间的动作，在获取数据和修改数据的时候，会竞争全局锁。
     class MisfireHandler extends Thread {
 
         private volatile boolean shutdown = false;
 
-        private int numFails = 0;
+        private int numFails = 0; // 线程在执行扫描期间连续失败的次数计数
         
 
         MisfireHandler() {
@@ -4162,6 +4258,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
                 long startTime = System.currentTimeMillis();
                 getLog().debug("MisfireHandler: scanning for misfires...");
 
+                // 恢复所有已经Misfire的触发器
                 RecoverMisfiredJobsResult res = doRecoverMisfires();
 
                 long endTime = System.currentTimeMillis();

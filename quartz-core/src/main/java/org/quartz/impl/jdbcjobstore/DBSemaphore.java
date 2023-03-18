@@ -113,6 +113,7 @@ public abstract class DBSemaphore implements Semaphore, Constants,
         // 判断是不是自己获取了锁，锁可重入
         if (!isLockOwner(lockName)) {
             // 执行加锁操作，在子类中实现 StdRowLockSemaphore
+            // SELECT * FROM {0}LOCKS WHERE SCHED_NAME = {1} AND LOCK_NAME = ? FOR UPDATE
             executeSQL(conn, lockName, expandedSQL, expandedInsertSQL);
             
             if(log.isDebugEnabled()) {

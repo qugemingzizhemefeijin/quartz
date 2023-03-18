@@ -1782,6 +1782,12 @@ J     *
         }
     }
 
+    /**
+     * 通知当前的触发器任务已经执行完毕了
+     * @param trigger  触发器对象
+     * @param detail   任务详情
+     * @param instCode 触发器的后续动作
+     */
     protected void notifyJobStoreJobComplete(OperableTrigger trigger, JobDetail detail, CompletedExecutionInstruction instCode) {
         resources.getJobStore().triggeredJobComplete(trigger, detail, instCode);
     }
@@ -1954,6 +1960,12 @@ J     *
         }
     }
 
+    /**
+     * 通知当前的监听器任务已经执行完成
+     * @param jec 任务信息
+     * @param je  异常信息，如果执行成功，则传入NULL
+     * @throws SchedulerException
+     */
     public void notifyJobListenersWasExecuted(JobExecutionContext jec,
             JobExecutionException je) throws SchedulerException {
         // build a list of all job listeners that are to be notified...
@@ -1974,6 +1986,11 @@ J     *
         }
     }
 
+    /**
+     * 通知当前的监听器执行发生异常
+     * @param msg 异常原因
+     * @param se  Exception
+     */
     public void notifySchedulerListenersError(String msg, SchedulerException se) {
         // build a list of all scheduler listeners that are to be notified...
         List<SchedulerListener> schedListeners = buildSchedulerListenerList();
@@ -2028,6 +2045,10 @@ J     *
         }
     }
 
+    /**
+     * 通知当前的监听器触发器任务已执行完毕
+     * @param trigger Trigger
+     */
     public void notifySchedulerListenersFinalized(Trigger trigger) {
         // build a list of all scheduler listeners that are to be notified...
         List<SchedulerListener> schedListeners = buildSchedulerListenerList();
