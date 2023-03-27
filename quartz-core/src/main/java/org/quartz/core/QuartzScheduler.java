@@ -212,8 +212,10 @@ public class QuartzScheduler implements RemotableQuartzScheduler {
             addInternalJobListener((JobListener)resources.getJobStore());
         }
 
+        // 初始化调度线程
         this.schedThread = new QuartzSchedulerThread(this, resources);
         ThreadExecutor schedThreadExecutor = resources.getThreadExecutor();
+        // 加入到线程池中（这里默认情况下，是 DefaultThreadExecutor 线程池，实际根本不是线程池，execute直接会调用this.schedThread的start方法启动线程）
         schedThreadExecutor.execute(this.schedThread);
         if (idleWaitTime > 0) {
             this.schedThread.setIdleWaitTime(idleWaitTime);
@@ -224,6 +226,7 @@ public class QuartzScheduler implements RemotableQuartzScheduler {
         errLogger = new ErrorLogger();
         addInternalSchedulerListener(errLogger);
 
+        // 初始化调度信号实例，以便暴露方便调用监听通知等（实际就是一个代理类，代理了QuartzScheduler和QuartzSchedulerThread类）
         signaler = new SchedulerSignalerImpl(this, this.schedThread);
         
         getLog().info("Quartz Scheduler v." + getVersion() + " created.");
@@ -805,6 +808,8 @@ public class QuartzScheduler implements RemotableQuartzScheduler {
      * If the given Trigger does not reference any <code>Job</code>, then it
      * will be set to reference the Job passed with it into this method.
      * </p>
+     *
+     * @return 返回任务触发执行的时间
      * 
      * @throws SchedulerException
      *           if the Job or Trigger cannot be added to the Scheduler, or
@@ -832,6 +837,7 @@ public class QuartzScheduler implements RemotableQuartzScheduler {
         
         OperableTrigger trig = (OperableTrigger)trigger;
 
+        // 触发器未设置JobKey，则使用JobDetail的key。否则两个对象的Key不一致，报错。
         if (trigger.getJobKey() == null) {
             trig.setJobKey(jobDetail.getKey());
         } else if (!trigger.getJobKey().equals(jobDetail.getKey())) {
@@ -839,8 +845,10 @@ public class QuartzScheduler implements RemotableQuartzScheduler {
                 "Trigger does not reference given job!");
         }
 
+        // 检查 name、group、jobName、jobGroup必须不为空。
         trig.validate();
 
+        // 如果触发器指定了日历名称，则从 qtzp_calendars 表中获取数据
         Calendar cal = null;
         if (trigger.getCalendarName() != null) {
             cal = resources.getJobStore().retrieveCalendar(trigger.getCalendarName());
@@ -852,9 +860,13 @@ public class QuartzScheduler implements RemotableQuartzScheduler {
                     "Based on configured schedule, the given trigger '" + trigger.getKey() + "' will never fire.");
         }
 
+        // 保存任务详情和触发器信息
         resources.getJobStore().storeJobAndTrigger(jobDetail, trig);
+        // 通知调取监听器任务被添加了
         notifySchedulerListenersJobAdded(jobDetail);
+        // 通知调度线程，如果睡眠了，则醒一醒
         notifySchedulerThread(trigger.getNextFireTime().getTime());
+        // 通知监听器，触发器被安排了
         notifySchedulerListenersSchduled(trigger);
 
         return ft;
@@ -1796,6 +1808,10 @@ J     *
         resources.getJobStore().triggeredJobComplete(trigger, detail, instCode);
     }
 
+    /**
+     * 唤醒睡眠的 QuartzSchedulerThread 调度线程
+     * @param candidateNewNextFireTime 当前唤醒的调度器的下次点火时间
+     */
     protected void notifySchedulerThread(long candidateNewNextFireTime) {
         if (isSignalOnSchedulingChange()) {
             signaler.signalSchedulingChange(candidateNewNextFireTime);

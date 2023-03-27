@@ -66,7 +66,14 @@ public class QuartzSchedulerThread extends Thread {
 
     private final Object sigLock = new Object();
 
+    /**
+     * 是否需要通知重新获取任务
+     */
     private boolean signaled;
+
+    /**
+     * 通知任务将被执行的触发时间
+     */
     private long signaledNextFireTime;
 
     private boolean paused;
@@ -211,18 +218,26 @@ public class QuartzSchedulerThread extends Thread {
      * waiting for the fire time to arrive.
      * </p>
      *
+     * 唤醒 QuartzSchedulerThread 调度线程
+     *
      * @param candidateNewNextFireTime the time (in millis) when the newly scheduled trigger
      * will fire.  If this method is being called do to some other even (rather
      * than scheduling a trigger), the caller should pass zero (0).
      */
     public void signalSchedulingChange(long candidateNewNextFireTime) {
         synchronized(sigLock) {
+            // 设置通知状态
             signaled = true;
+            // 设置待执行任务的执行时间
             signaledNextFireTime = candidateNewNextFireTime;
+            // 唤醒休眠线程
             sigLock.notifyAll();
         }
     }
 
+    /**
+     * 清理通知状态和待执行任务的执行触发时间
+     */
     public void clearSignaledSchedulingChange() {
         synchronized(sigLock) {
             signaled = false;
@@ -230,12 +245,20 @@ public class QuartzSchedulerThread extends Thread {
         }
     }
 
+    /**
+     * 判断当前是否通知状态为true
+     * @return boolean
+     */
     public boolean isScheduleChanged() {
         synchronized(sigLock) {
             return signaled;
         }
     }
 
+    /**
+     * 用于判断是否需要在 QuartzSchedulerThread 中继续wait
+     * @return 触发通知的触发器要求的点火时间
+     */
     public long getSignaledNextFireTime() {
         synchronized(sigLock) {
             return signaledNextFireTime;

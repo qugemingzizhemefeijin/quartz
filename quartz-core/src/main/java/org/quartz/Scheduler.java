@@ -410,6 +410,10 @@ public interface Scheduler {
      * If the given Trigger does not reference any <code>Job</code>, then it
      * will be set to reference the Job passed with it into this method.
      * </p>
+     *
+     * <p>
+     *     添加一条触发器和触发器任务详情
+     * </p>
      * 
      * @throws SchedulerException
      *           if the Job or Trigger cannot be added to the Scheduler, or

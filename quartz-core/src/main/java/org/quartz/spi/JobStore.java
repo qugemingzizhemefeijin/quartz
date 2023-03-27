@@ -122,6 +122,8 @@ public interface JobStore {
     /**
      * Store the given <code>{@link org.quartz.JobDetail}</code> and <code>{@link org.quartz.Trigger}</code>.
      *
+     * 保存任务详情和触发器信息
+     *
      * @param newJob
      *          The <code>JobDetail</code> to be stored.
      * @param newTrigger

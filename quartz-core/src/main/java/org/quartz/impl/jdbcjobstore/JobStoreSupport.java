@@ -1125,11 +1125,14 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     public void storeJobAndTrigger(final JobDetail newJob,
             final OperableTrigger newTrigger) 
         throws JobPersistenceException {
+        // 存储任务和触发器的时候，默认情况需要获取 TRIGGER_ACCESS 锁
         executeInLock(
             (isLockOnInsert()) ? LOCK_TRIGGER_ACCESS : null,
             new VoidTransactionCallback() {
                 public void executeVoid(Connection conn) throws JobPersistenceException {
+                    // 获取锁成功之后，保存任务对象
                     storeJob(conn, newJob, false);
+                    // 保存触发器对象
                     storeTrigger(conn, newTrigger, newJob, false,
                             Constants.STATE_WAITING, false, false);
                 }
@@ -1164,15 +1167,17 @@ public abstract class JobStoreSupport implements JobStore, Constants {
     
     /**
      * <p>
-     * Insert or update a job.
+     * 插入或更新一个任务对象
      * </p>
      */
     protected void storeJob(Connection conn, 
             JobDetail newJob, boolean replaceExisting)
         throws JobPersistenceException {
 
+        // 查看任务是否存在
         boolean existingJob = jobExists(conn, newJob.getKey());
         try {
+            // 任务存在，并且允许替换，才执行修改动作
             if (existingJob) {
                 if (!replaceExisting) { 
                     throw new ObjectAlreadyExistsException(newJob); 
@@ -1192,7 +1197,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
 
     /**
      * <p>
-     * Check existence of a given job.
+     * Check existence of a given job. 查看任务是否存在
      * </p>
      */
     protected boolean jobExists(Connection conn, JobKey jobKey) throws JobPersistenceException {
@@ -1274,6 +1279,7 @@ public abstract class JobStoreSupport implements JobStore, Constants {
             }
 
             if(job == null) {
+                // 获取任务详情
                 job = retrieveJob(conn, newTrigger.getJobKey());
             }
             if (job == null) {

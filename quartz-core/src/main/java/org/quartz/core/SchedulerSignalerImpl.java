@@ -44,6 +44,10 @@ public class SchedulerSignalerImpl implements SchedulerSignaler {
      */
 
     protected QuartzScheduler sched;
+
+    /**
+     * Quartz任务调度线程
+     */
     protected QuartzSchedulerThread schedThread;
 
     /*

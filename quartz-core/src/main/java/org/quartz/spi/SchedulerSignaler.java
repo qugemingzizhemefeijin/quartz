@@ -43,6 +43,10 @@ public interface SchedulerSignaler {
 
     void notifySchedulerListenersJobDeleted(JobKey jobKey);
 
+    /**
+     * 通知调度程序（QuartzSchedulerThread），有任务改变。这样可以立即唤醒线程，做一下任务获取检查。
+     * @param candidateNewNextFireTime 等待任务执行的最新时间
+     */
     void signalSchedulingChange(long candidateNewNextFireTime);
 
     void notifySchedulerListenersError(String string, SchedulerException jpe);

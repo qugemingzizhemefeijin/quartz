@@ -246,6 +246,7 @@ public class StdScheduler implements Scheduler {
      */
     public Date scheduleJob(JobDetail jobDetail, Trigger trigger)
         throws SchedulerException {
+        // 向 QuartzScheduler 添加一个任务
         return sched.scheduleJob(jobDetail, trigger);
     }
 

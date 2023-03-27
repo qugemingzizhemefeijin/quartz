@@ -764,6 +764,7 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         ResultSet rs = null;
 
         try {
+            // SELECT IS_NONCONCURRENT FROM {0}JOB_DETAILS WHERE SCHED_NAME = {1} AND JOB_NAME = ? AND JOB_GROUP = ?
             ps = conn.prepareStatement(rtp(SELECT_JOB_NONCONCURRENT));
             ps.setString(1, jobKey.getName());
             ps.setString(2, jobKey.getGroup());
@@ -791,6 +792,7 @@ public class StdJDBCDelegate implements DriverDelegate, StdJDBCConstants {
         ResultSet rs = null;
 
         try {
+            // SELECT JOB_NAME FROM {0}JOB_DETAILS WHERE SCHED_NAME = {1} AND JOB_NAME = ? AND JOB_GROUP = ?
             ps = conn.prepareStatement(rtp(SELECT_JOB_EXISTENCE));
             ps.setString(1, jobKey.getName());
             ps.setString(2, jobKey.getGroup());

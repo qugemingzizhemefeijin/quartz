@@ -627,6 +627,11 @@ public class StdSchedulerFactory implements SchedulerFactory {
      * <p>new QuartzScheduler();
      * <p>StdScheduler的所有方法都委托给了QuartzScheduler；
      *
+     * <p>
+     *     Spring Quartz 在通过 org.springframework.scheduling.quartz.SchedulerFactoryBean 也是最终调用到这个方法来创建 Scheduler 对象，
+     *     然后托管给 Spring 管理。
+     * </p>
+     *
      * @return Scheduler
      * @throws SchedulerException
      */
@@ -1363,11 +1368,13 @@ public class StdSchedulerFactory implements SchedulerFactory {
             for (int i = 0; i < plugins.length; i++) {
                 rsrcs.addSchedulerPlugin(plugins[i]);
             }
-    
+
+            // 初始化Quartz调度器（这里会创建出 QuartzSchedulerThread 任务调度线程）
             qs = new QuartzScheduler(rsrcs, idleWaitTime, dbFailureRetry);
             qsInited = true;
     
             // Create Scheduler ref...
+            // 创建 QuartzScheduler 的代理对象 new StdScheduler(qs);
             Scheduler scheduler = instantiate(rsrcs, qs);
     
             // set job factory if specified

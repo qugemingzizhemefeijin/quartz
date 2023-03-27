@@ -295,6 +295,8 @@ public interface DriverDelegate {
      * Check whether or not the given job disallows concurrent execution.
      * </p>
      * 
+     * 检查任务是否关闭了允许并发执行功能
+     * 
      * @param conn
      *          the DB Connection
      * 
@@ -306,6 +308,8 @@ public interface DriverDelegate {
      * <p>
      * Check whether or not the given job exists.
      * </p>
+     *
+     * 查看任务是否存在
      * 
      * @param conn
      *          the DB Connection

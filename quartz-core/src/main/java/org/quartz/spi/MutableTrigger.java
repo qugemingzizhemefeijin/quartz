@@ -30,6 +30,10 @@ import org.quartz.TriggerUtils;
 
 public interface MutableTrigger extends Trigger {
 
+    /**
+     * 设置触发器的TriggerKey，并设置name和group字段，从key参数中获取
+     * @param key TriggerKey
+     */
     public void setKey(TriggerKey key);
 
     public void setJobKey(JobKey key);
